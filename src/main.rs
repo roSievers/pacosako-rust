@@ -84,10 +84,10 @@ impl Display for PacoBoard {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         writeln!(
             f,
-            "╔═════════════════════════╗"
+            "╔═══════════════════════════╗"
         )?;
         for y in (0..8).rev() {
-            write!(f, "║")?;
+            write!(f, "║ {}", y + 1)?;
             for x in 0..8 {
                 let coord = x + 8 * y;
                 let w = self.white.get(coord).unwrap();
@@ -113,9 +113,10 @@ impl Display for PacoBoard {
             }
             writeln!(f, " ║")?;
         }
+        writeln!(f, "║   A  B  C  D  E  F  G  H  ║")?;
         writeln!(
             f,
-            "╚═════════════════════════╝"
+            "╚═══════════════════════════╝"
         )?;
         Ok(())
     }
