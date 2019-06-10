@@ -1,6 +1,9 @@
 
 use colored::*;
+
 use std::fmt;
+
+use std::fmt::Debug;
 use std::fmt::Display;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -53,7 +56,7 @@ impl PieceType {
 
 /// In a DenseBoard we reserve memory for all positions.
 #[derive(Clone, Debug)]
-struct PacoBoard {
+struct DenseBoard {
     white: Vec<Option<PieceType>>,
     black: Vec<Option<PieceType>>,
     dance: Vec<bool>,
@@ -62,13 +65,90 @@ struct PacoBoard {
     lifted_piece: Option<(BoardPosition, PieceType)>,
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+/// Represents zero to two lifted pieces
+/// The owner of the pieces must be tracked externally, usually this will be the current player.
+enum Hand {
+    Empty,
+    Single {
+        piece: PieceType,
+        position: BoardPosition,
+    },
+    Pair {
+        piece: PieceType,
+        partner: PieceType,
+        position: BoardPosition,
+    },
+}
+
+#[derive(Copy, Clone, PartialEq, Eq)]
 struct BoardPosition(u8);
 
-impl PacoBoard {
+impl BoardPosition {
+    fn x(self) -> u8 {
+        self.0 % 8
+    }
+    fn y(self) -> u8 {
+        self.0 / 8
+    }
+    fn new(x: u8, y: u8) -> Self {
+        Self(x + 8 * y)
+    }
+    fn new_checked(x: i8, y: i8) -> Option<Self> {
+        if x >= 0 && y >= 0 && x < 7 && y < 8 {
+            Some(Self::new(x as u8, y as u8))
+        } else {
+            None
+        }
+    }
+    fn add(self, other: (i8, i8)) -> Option<Self> {
+        Self::new_checked(self.x() as i8 + other.0, self.y() as i8 + other.1)
+    }
+}
+
+/// The debug output for a position is a string like d4 that is easily human readable.
+impl Debug for BoardPosition {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}{}",
+            ["a", "b", "c", "d", "e", "f", "g", "h"][self.x() as usize],
+            self.y() + 1
+        )
+    }
+}
+
+/// The display output for a position is a string like d4 that is easily human readable.
+/// The Display implementation just wraps the Debug implementation.
+impl Display for BoardPosition {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
+/// A PacoAction is an action that can be applied to a PacoBoard to modify it.
+/// An action is an atomar part of a move, like picking up a piece or placing it down.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+enum PacoAction {
+    /// Lifting a piece starts a move.
+    Lift(BoardPosition),
+    /// Placing the piece picked up earlier either ends a move or continues it in case of a chain.
+    Place(BoardPosition),
+}
+
+/// The PacoBoard trait encapsulates arbitrary Board implementations.
+trait PacoBoard {
+    /// Check if a PacoAction is legal and execute it. Otherwise return an error.
+    fn execute(&mut self, action: PacoAction) -> Result<&mut Self, ()>;
+    /// List all actions that can be executed in the current state. Note that actions which leave
+    /// the board in a deadend state (like lifting up a pawn that is blocked) should be included
+    /// in the list as well.
+    fn actions(&self) -> Vec<PacoAction>;
+}
+
+impl DenseBoard {
     fn new() -> Self {
         use PieceType::*;
-        let mut result: Self = PacoBoard {
+        let mut result: Self = DenseBoard {
             white: Vec::with_capacity(64),
             black: Vec::with_capacity(64),
             dance: vec![false; 64],
@@ -146,6 +226,7 @@ impl PacoBoard {
             } else {
                 *piece = Some(lifted.1);
                 self.lifted_piece = None;
+                self.other_player();
                 Ok(self)
             }
         } else {
@@ -157,10 +238,133 @@ impl PacoBoard {
         self.current_player = self.current_player.other();
         self
     }
+
+    /// The Dense Board representaition containing only pieces of the current player.
+    fn active_pieces(&self) -> &Vec<Option<PieceType>> {
+        match self.current_player {
+            PlayerColor::White => &self.white,
+            PlayerColor::Black => &self.black,
+        }
+    }
+
+    /// The Dense Board representaition containing only pieces of the opponent player.
+    fn opponent_pieces(&self) -> &Vec<Option<PieceType>> {
+        match self.current_player {
+            PlayerColor::White => &self.black,
+            PlayerColor::Black => &self.white,
+        }
+    }
+
+    /// All positions where the active player has a piece.
+    fn active_positions<'a>(&'a self) -> impl Iterator<Item = BoardPosition> + 'a {
+        // The filter map takes (usize, Optional<PieceType>) and returns Optional<BoardPosition>
+        // where we just place the index in a Some whenever a piece is found.
+        self.active_pieces()
+            .iter()
+            .enumerate()
+            .filter_map(|p| p.1.map(|_| BoardPosition(p.0 as u8)))
+    }
+
+    /// All place target for a piece of given type at a given position.
+    /// This is intended to recieve its own lifted piece as input but does not require it.
+    fn place_targets(&self, position: BoardPosition, piece_type: PieceType) -> Vec<BoardPosition> {
+        use PieceType::*;
+        match piece_type {
+            Pawn => self.place_targets_pawn(position),
+            Rock => self.place_targets_rock(position),
+            Knight => self.place_targets_knight(position),
+            Bishop => self.place_targets_bishop(position),
+            Queen => self.place_targets_queen(position),
+            King => self.place_targets_king(position),
+        }
+    }
+
+    /// Calculates all possible placement targets for a pawn at the given position.
+    fn place_targets_pawn(&self, position: BoardPosition) -> Vec<BoardPosition> {
+        vec![]
+    }
+    /// Calculates all possible placement targets for a rock at the given position.
+    fn place_targets_rock(&self, position: BoardPosition) -> Vec<BoardPosition> {
+        vec![]
+    }
+    /// Calculates all possible placement targets for a knight at the given position.
+    fn place_targets_knight(&self, position: BoardPosition) -> Vec<BoardPosition> {
+        let offsets = vec![
+            (1, 2),
+            (2, 1),
+            (2, -1),
+            (1, -2),
+            (-1, -2),
+            (-2, -1),
+            (-2, 1),
+            (-1, 2),
+        ];
+        let targets_on_board = offsets.iter().filter_map(|d| position.add(*d));
+        targets_on_board.filter(|p| self.can_place_at(*p)).collect()
+    }
+    /// Calculates all possible placement targets for a bishop at the given position.
+    fn place_targets_bishop(&self, position: BoardPosition) -> Vec<BoardPosition> {
+        vec![]
+    }
+    /// Calculates all possible placement targets for a queen at the given position.
+    fn place_targets_queen(&self, position: BoardPosition) -> Vec<BoardPosition> {
+        vec![]
+    }
+    /// Calculates all possible placement targets for a king at the given position.
+    fn place_targets_king(&self, position: BoardPosition) -> Vec<BoardPosition> {
+        vec![]
+    }
+    /// Decide whether the current player may place a lifted piece at the indicated position.
+    ///
+    /// This is only forbidden when the target position holds a piece of the own color
+    /// without a dance partner.
+    fn can_place_at(&self, target: BoardPosition) -> bool {
+        let opponent_present = self
+            .opponent_pieces()
+            .get(target.0 as usize)
+            .unwrap()
+            .is_some();
+        if opponent_present {
+            true
+        } else {
+            let self_present = self
+                .active_pieces()
+                .get(target.0 as usize)
+                .unwrap()
+                .is_some();
+            !self_present
+        }
+    }
+}
+
+impl PacoBoard for DenseBoard {
+    fn execute(&mut self, action: PacoAction) -> Result<&mut Self, ()> {
+        use PacoAction::*;
+        match action {
+            Lift(position) => self.lift(position),
+            Place(position) => self.place(position),
+        }
+    }
+    fn actions(&self) -> Vec<PacoAction> {
+        use PacoAction::*;
+        if let Some((position, piece_type)) = self.lifted_piece {
+            // the player currently lifts a piece, we calculate all possible positions where
+            // it can be placed down. This takes opponents pieces in considerations but won't
+            // discard chaining into a blocked pawn (or simmilar).
+            self.place_targets(position, piece_type)
+                .iter()
+                .map(|p| Place(*p))
+                .collect()
+        } else {
+            // If no piece is lifted up, then we just return lifting actions of all pieces of the
+            // current player.
+            self.active_positions().map(Lift).collect()
+        }
+    }
 }
 
 
-impl Display for PacoBoard {
+impl Display for DenseBoard {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         use PlayerColor::*;
         writeln!(
@@ -172,7 +376,7 @@ impl Display for PacoBoard {
         for y in (0..8).rev() {
             write!(f, "║ {}", y + 1)?;
             for x in 0..8 {
-                let coord = x + 8 * y;
+                let coord = BoardPosition::new(x, y).0 as usize;
                 let w = self.white.get(coord).unwrap();
                 let b = self.black.get(coord).unwrap();
 
@@ -224,14 +428,18 @@ impl Display for PacoBoard {
 }
 
 fn main() -> Result<(), ()> {
+    use PacoAction::*;
     println!("Initial Board layout: ");
-    let mut board = PacoBoard::new();
+    let mut board = DenseBoard::new();
     println!("{}", board);
-    board.lift(BoardPosition(10))?;
+    board.execute(Lift(BoardPosition(11)))?;
     println!("{}", board);
-    board.place(BoardPosition(26))?;
-    board.other_player();
+    board.execute(Place(BoardPosition(27)))?;
     println!("{}", board);
+    // Show possible moves of the black knight on b8.
+    board.execute(Lift(BoardPosition::new(1, 7)))?;
+    println!("{}", board);
+    println!("{:?}", board.actions());
     Ok(())
 }
 
