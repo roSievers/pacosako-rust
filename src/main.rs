@@ -22,7 +22,20 @@ enum PlayerColor {
     Black,
 }
 
+#[derive(Clone, Debug)]
+enum PacoError {
+    // You can not "Lift" when the hand is full.
+    LiftFullHand,
+    // You can not "Lift" from an empty position.
+    LiftEmptyPosition,
+    // You can not "Place" when the hand is empty.
+    PlaceEmptyHand,
+    // You can not "Place" a pair when the target is occupied.
+    PlacePairFullPosition,
+}
+
 impl PlayerColor {
+    #[allow(dead_code)]
     fn other(self) -> Self {
         use PlayerColor::*;
         match self {
@@ -61,12 +74,12 @@ struct DenseBoard {
     black: Vec<Option<PieceType>>,
     dance: Vec<bool>,
     current_player: PlayerColor,
-    // The lifted piece has no player color as it must belong to the current player.
-    lifted_piece: Option<(BoardPosition, PieceType)>,
+    lifted_piece: Hand,
 }
 
 /// Represents zero to two lifted pieces
 /// The owner of the pieces must be tracked externally, usually this will be the current player.
+#[derive(Clone, Debug, PartialEq, Eq)]
 enum Hand {
     Empty,
     Single {
@@ -78,6 +91,17 @@ enum Hand {
         partner: PieceType,
         position: BoardPosition,
     },
+}
+
+impl Hand {
+    fn position(&self) -> Option<BoardPosition> {
+        use Hand::*;
+        match self {
+            Empty => None,
+            Single { position, .. } => Some(*position),
+            Pair { position, .. } => Some(*position),
+        }
+    }
 }
 
 #[derive(Copy, Clone, PartialEq, Eq)]
@@ -138,7 +162,7 @@ enum PacoAction {
 /// The PacoBoard trait encapsulates arbitrary Board implementations.
 trait PacoBoard {
     /// Check if a PacoAction is legal and execute it. Otherwise return an error.
-    fn execute(&mut self, action: PacoAction) -> Result<&mut Self, ()>;
+    fn execute(&mut self, action: PacoAction) -> Result<&mut Self, PacoError>;
     /// List all actions that can be executed in the current state. Note that actions which leave
     /// the board in a deadend state (like lifting up a pawn that is blocked) should be included
     /// in the list as well.
@@ -153,7 +177,7 @@ impl DenseBoard {
             black: Vec::with_capacity(64),
             dance: vec![false; 64],
             current_player: PlayerColor::White,
-            lifted_piece: None,
+            lifted_piece: Hand::Empty,
         };
 
         // Board structure
@@ -191,55 +215,84 @@ impl DenseBoard {
 
     /// Lifts the piece of the current player in the given position of the board.
     /// Only one piece may be lifted at a time.
-    fn lift(&mut self, position: BoardPosition) -> Result<&mut Self, ()> {
-        use PlayerColor::*;
-        if self.lifted_piece != None {
-            return Err(());
+    fn lift(&mut self, position: BoardPosition) -> Result<&mut Self, PacoError> {
+        if self.lifted_piece != Hand::Empty {
+            return Err(PacoError::LiftFullHand);
         }
-        let piece = match self.current_player {
-            White => self.white.get_mut(position.0 as usize),
-            Black => self.black.get_mut(position.0 as usize),
-        }
-        .unwrap();
+        // We unwrap the pieces once to remove the outer Some() from the .get_mut(..) call.
+        // We still recieve an optional where None represents an empty square.
+        let piece = *self.active_pieces().get(position.0 as usize).unwrap();
+        let partner = *self.opponent_pieces().get(position.0 as usize).unwrap();
 
         if let Some(piece_type) = piece {
-            self.lifted_piece = Some((position, *piece_type));
-            *piece = None;
+            if let Some(partner_type) = partner {
+                self.lifted_piece = Hand::Pair {
+                    piece: piece_type,
+                    partner: partner_type,
+                    position,
+                };
+                *self
+                    .opponent_pieces_mut()
+                    .get_mut(position.0 as usize)
+                    .unwrap() = None;
+            } else {
+                self.lifted_piece = Hand::Single {
+                    piece: piece_type,
+                    position,
+                };
+            }
+            *self
+                .active_pieces_mut()
+                .get_mut(position.0 as usize)
+                .unwrap() = None;
             Ok(self)
         } else {
-            Err(())
+            Err(PacoError::LiftEmptyPosition)
         }
     }
 
     /// Places the piece that is currently lifted back on the board.
     /// Returns an error if no piece is currently being lifted.
-    fn place(&mut self, position: BoardPosition) -> Result<&mut Self, ()> {
-        use PlayerColor::*;
-        if let Some(lifted) = self.lifted_piece {
-            let piece = match self.current_player {
-                White => self.white.get_mut(position.0 as usize),
-                Black => self.black.get_mut(position.0 as usize),
-            }
-            .unwrap();
-            if piece.is_some() {
-                Err(())
-            } else {
-                *piece = Some(lifted.1);
-                self.lifted_piece = None;
-                self.other_player();
+    fn place(&mut self, target: BoardPosition) -> Result<&mut Self, PacoError> {
+        match self.lifted_piece {
+            Hand::Empty => Err(PacoError::PlaceEmptyHand),
+            Hand::Single { piece, .. } => {
+                // Read piece currently on the board at the target position and place the
+                // held piece there.
+                let board_piece = *self.active_pieces().get(target.0 as usize).unwrap();
+                *self.active_pieces_mut().get_mut(target.0 as usize).unwrap() = Some(piece);
+                if let Some(new_hand_piece) = board_piece {
+                    self.lifted_piece = Hand::Single {
+                        piece: new_hand_piece,
+                        position: target,
+                    };
+                } else {
+                    self.lifted_piece = Hand::Empty;
+                    self.current_player = self.current_player.other();
+                }
                 Ok(self)
             }
-        } else {
-            Err(())
+            Hand::Pair { piece, partner, .. } => {
+                let board_piece = self.active_pieces().get(target.0 as usize).unwrap();
+                let board_partner = self.opponent_pieces().get(target.0 as usize).unwrap();
+
+                if board_piece.is_some() || board_partner.is_some() {
+                    Err(PacoError::PlacePairFullPosition)
+                } else {
+                    *self.active_pieces_mut().get_mut(target.0 as usize).unwrap() = Some(piece);
+                    *self
+                        .opponent_pieces_mut()
+                        .get_mut(target.0 as usize)
+                        .unwrap() = Some(partner);
+                    self.lifted_piece = Hand::Empty;
+                    self.current_player = self.current_player.other();
+                    Ok(self)
+                }
+            }
         }
     }
 
-    fn other_player(&mut self) -> &mut Self {
-        self.current_player = self.current_player.other();
-        self
-    }
-
-    /// The Dense Board representaition containing only pieces of the current player.
+    /// The Dense Board representation containing only pieces of the current player.
     fn active_pieces(&self) -> &Vec<Option<PieceType>> {
         match self.current_player {
             PlayerColor::White => &self.white,
@@ -247,11 +300,27 @@ impl DenseBoard {
         }
     }
 
-    /// The Dense Board representaition containing only pieces of the opponent player.
+    /// The Dense Board representation containing only pieces of the opponent player.
     fn opponent_pieces(&self) -> &Vec<Option<PieceType>> {
         match self.current_player {
             PlayerColor::White => &self.black,
             PlayerColor::Black => &self.white,
+        }
+    }
+
+    /// The Dense Board representation containing only pieces of the current player.
+    fn active_pieces_mut(&mut self) -> &mut Vec<Option<PieceType>> {
+        match self.current_player {
+            PlayerColor::White => &mut self.white,
+            PlayerColor::Black => &mut self.black,
+        }
+    }
+
+    /// The Dense Board representation containing only pieces of the opponent player.
+    fn opponent_pieces_mut(&mut self) -> &mut Vec<Option<PieceType>> {
+        match self.current_player {
+            PlayerColor::White => &mut self.black,
+            PlayerColor::Black => &mut self.white,
         }
     }
 
@@ -338,7 +407,7 @@ impl DenseBoard {
 }
 
 impl PacoBoard for DenseBoard {
-    fn execute(&mut self, action: PacoAction) -> Result<&mut Self, ()> {
+    fn execute(&mut self, action: PacoAction) -> Result<&mut Self, PacoError> {
         use PacoAction::*;
         match action {
             Lift(position) => self.lift(position),
@@ -347,18 +416,27 @@ impl PacoBoard for DenseBoard {
     }
     fn actions(&self) -> Vec<PacoAction> {
         use PacoAction::*;
-        if let Some((position, piece_type)) = self.lifted_piece {
-            // the player currently lifts a piece, we calculate all possible positions where
-            // it can be placed down. This takes opponents pieces in considerations but won't
-            // discard chaining into a blocked pawn (or simmilar).
-            self.place_targets(position, piece_type)
-                .iter()
-                .map(|p| Place(*p))
-                .collect()
-        } else {
-            // If no piece is lifted up, then we just return lifting actions of all pieces of the
-            // current player.
-            self.active_positions().map(Lift).collect()
+        match self.lifted_piece {
+            Hand::Empty => {
+                // If no piece is lifted up, then we just return lifting actions of all pieces of
+                // the current player.
+                self.active_positions().map(Lift).collect()
+            }
+            Hand::Single { piece, position } => {
+                // the player currently lifts a piece, we calculate all possible positions where
+                // it can be placed down. This takes opponents pieces in considerations but won't
+                // discard chaining into a blocked pawn (or simmilar).
+                self.place_targets(position, piece)
+                    .iter()
+                    .map(|p| Place(*p))
+                    .collect()
+            }
+            Hand::Pair {
+                piece, position, ..
+            } => {
+                // TODO
+                vec![]
+            }
         }
     }
 }
@@ -372,7 +450,7 @@ impl Display for DenseBoard {
             "╔═══════════════════════════╗"
         )?;
         let mut trailing_bracket = false;
-        let highlighted_position = self.lifted_piece.map(|l| (l.0).0 as usize);
+        let highlighted_position = self.lifted_piece.position().map(|p| p.0 as usize);
         for y in (0..8).rev() {
             write!(f, "║ {}", y + 1)?;
             for x in 0..8 {
@@ -411,13 +489,32 @@ impl Display for DenseBoard {
             writeln!(f, " ║")?;
         }
 
-        let lifted = self.lifted_piece.map_or("*", |p| p.1.to_char());
-
-        writeln!(
-            f,
-            "║ {} A  B  C  D  E  F  G  H  ║",
-            self.current_player.paint_string(lifted)
-        )?;
+        match self.lifted_piece {
+            Hand::Empty => writeln!(
+                f,
+                "║ {} A  B  C  D  E  F  G  H  ║",
+                self.current_player.paint_string("*")
+            )?,
+            Hand::Single { piece, .. } => {
+                writeln!(
+                    f,
+                    "║ {} A  B  C  D  E  F  G  H  ║",
+                    self.current_player.paint_string(piece.to_char())
+                )?;
+            }
+            Hand::Pair { piece, partner, .. } => {
+                let (w, b) = match self.current_player {
+                    PlayerColor::White => (piece, partner),
+                    PlayerColor::Black => (partner, piece),
+                };
+                writeln!(
+                    f,
+                    "║{}{} A  B  C  D  E  F  G  H  ║",
+                    White.paint_string(w.to_char()),
+                    Black.paint_string(b.to_char())
+                )?;
+            }
+        }
         write!(
             f,
             "╚═══════════════════════════╝"
@@ -427,19 +524,29 @@ impl Display for DenseBoard {
 
 }
 
-fn main() -> Result<(), ()> {
+fn main() -> Result<(), PacoError> {
     use PacoAction::*;
     println!("Initial Board layout: ");
     let mut board = DenseBoard::new();
     println!("{}", board);
-    board.execute(Lift(BoardPosition(11)))?;
+    board.execute(Lift(BoardPosition::new(3, 1)))?;
     println!("{}", board);
-    board.execute(Place(BoardPosition(27)))?;
+    board.execute(Place(BoardPosition::new(3, 3)))?;
     println!("{}", board);
     // Show possible moves of the black knight on b8.
     board.execute(Lift(BoardPosition::new(1, 7)))?;
     println!("{}", board);
-    println!("{:?}", board.actions());
+
+    // This may not be legal, but we want to try moving pairs.
+    board.execute(Place(BoardPosition::new(3, 3)))?;
+    println!("{}", board);
+
+    board.execute(Lift(BoardPosition::new(3, 3)))?;
+    println!("{}", board);
+    board.execute(Place(BoardPosition::new(3, 4)))?;
+    println!("{}", board);
+
+    // println!("{:?}", board.actions());
     Ok(())
 }
 
