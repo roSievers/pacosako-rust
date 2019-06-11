@@ -335,29 +335,75 @@ impl DenseBoard {
     }
 
     /// All place target for a piece of given type at a given position.
-    /// This is intended to recieve its own lifted piece as input but does not require it.
-    fn place_targets(&self, position: BoardPosition, piece_type: PieceType) -> Vec<BoardPosition> {
+    /// This is intended to recieve its own lifted piece as input but will work if the
+    /// input piece is different.
+    fn place_targets(
+        &self,
+        position: BoardPosition,
+        piece_type: PieceType,
+        is_pair: bool,
+    ) -> Vec<BoardPosition> {
         use PieceType::*;
         match piece_type {
-            Pawn => self.place_targets_pawn(position),
-            Rock => self.place_targets_rock(position),
-            Knight => self.place_targets_knight(position),
-            Bishop => self.place_targets_bishop(position),
-            Queen => self.place_targets_queen(position),
+            Pawn => self.place_targets_pawn(position, is_pair),
+            Rock => self.place_targets_rock(position, is_pair),
+            Knight => self.place_targets_knight(position, is_pair),
+            Bishop => self.place_targets_bishop(position, is_pair),
+            Queen => self.place_targets_queen(position, is_pair),
             King => self.place_targets_king(position),
         }
     }
 
     /// Calculates all possible placement targets for a pawn at the given position.
-    fn place_targets_pawn(&self, position: BoardPosition) -> Vec<BoardPosition> {
-        vec![]
+    fn place_targets_pawn(&self, position: BoardPosition, is_pair: bool) -> Vec<BoardPosition> {
+        use PlayerColor::White;
+        let mut possible_moves = Vec::new();
+
+        let forward = if self.current_player == White { 1 } else { -1 };
+
+        // Striking left & right, this is only possible if there is a target
+        // and in particular this is never possible for a pair.
+        if !is_pair {
+            let strike_directions = [(-1, forward), (1, forward)];
+            let targets_on_board = strike_directions.iter().filter_map(|d| position.add(*d));
+
+            // TODO: The filter function can be more performant by directly checking
+            // "opponent_present" instead.
+            targets_on_board
+                .filter(|p| self.can_place_single_at(*p) && !self.is_empty(*p))
+                .for_each(|p| possible_moves.push(p));
+        }
+
+        // Moving forward, this is similar to a king
+        if let Some(step) = position.add((0, forward)) {
+            if self.is_empty(step) {
+                possible_moves.push(step);
+                // If we are on the base row, check if we can move another step.
+                let base_row = if self.current_player == White { 1 } else { 6 };
+                if position.y() == base_row {
+                    if let Some(step_2) = step.add((0, forward)) {
+                        if self.is_empty(step_2) {
+                            possible_moves.push(step_2);
+                        }
+                    }
+                }
+            }
+        }
+
+        // TODO: En passant, see https://en.wikipedia.org/wiki/En_passant
+
+        possible_moves
     }
     /// Calculates all possible placement targets for a rock at the given position.
-    fn place_targets_rock(&self, position: BoardPosition) -> Vec<BoardPosition> {
-        vec![]
+    fn place_targets_rock(&self, position: BoardPosition, is_pair: bool) -> Vec<BoardPosition> {
+        let directions = vec![(1, 0), (0, 1), (-1, 0), (0, -1)];
+        directions
+            .iter()
+            .flat_map(|d| self.slide_targets(position, *d, is_pair))
+            .collect()
     }
     /// Calculates all possible placement targets for a knight at the given position.
-    fn place_targets_knight(&self, position: BoardPosition) -> Vec<BoardPosition> {
+    fn place_targets_knight(&self, position: BoardPosition, is_pair: bool) -> Vec<BoardPosition> {
         let offsets = vec![
             (1, 2),
             (2, 1),
@@ -369,25 +415,63 @@ impl DenseBoard {
             (-1, 2),
         ];
         let targets_on_board = offsets.iter().filter_map(|d| position.add(*d));
-        targets_on_board.filter(|p| self.can_place_at(*p)).collect()
+        if is_pair {
+            targets_on_board.filter(|p| self.is_empty(*p)).collect()
+        } else {
+            targets_on_board
+                .filter(|p| self.can_place_single_at(*p))
+                .collect()
+        }
     }
     /// Calculates all possible placement targets for a bishop at the given position.
-    fn place_targets_bishop(&self, position: BoardPosition) -> Vec<BoardPosition> {
-        vec![]
+    fn place_targets_bishop(&self, position: BoardPosition, is_pair: bool) -> Vec<BoardPosition> {
+        let directions = vec![(1, 1), (-1, 1), (1, -1), (-1, -1)];
+        directions
+            .iter()
+            .flat_map(|d| self.slide_targets(position, *d, is_pair))
+            .collect()
     }
     /// Calculates all possible placement targets for a queen at the given position.
-    fn place_targets_queen(&self, position: BoardPosition) -> Vec<BoardPosition> {
-        vec![]
+    fn place_targets_queen(&self, position: BoardPosition, is_pair: bool) -> Vec<BoardPosition> {
+        let directions = vec![
+            (1, 2),
+            (2, 1),
+            (2, -1),
+            (1, -2),
+            (-1, -2),
+            (-2, -1),
+            (-2, 1),
+            (-1, 2),
+        ];
+        directions
+            .iter()
+            .flat_map(|d| self.slide_targets(position, *d, is_pair))
+            .collect()
     }
     /// Calculates all possible placement targets for a king at the given position.
     fn place_targets_king(&self, position: BoardPosition) -> Vec<BoardPosition> {
-        vec![]
+        let offsets = vec![
+            (0, 1),
+            (1, 1),
+            (1, 0),
+            (1, -1),
+            (0, -1),
+            (-1, -1),
+            (-1, 0),
+            (-1, 1),
+        ];
+        let targets_on_board = offsets.iter().filter_map(|d| position.add(*d));
+        // Placing the king works like placing a pair, as he can only be placed on empty squares.
+        targets_on_board.filter(|p| self.is_empty(*p)).collect()
+
+        // TODO: Casteling. This depends on a working Ŝako solver, as the king must not be
+        // in Ŝako in order to castle.
     }
-    /// Decide whether the current player may place a lifted piece at the indicated position.
+    /// Decide whether the current player may place a single lifted piece at the indicated position.
     ///
     /// This is only forbidden when the target position holds a piece of the own color
     /// without a dance partner.
-    fn can_place_at(&self, target: BoardPosition) -> bool {
+    fn can_place_single_at(&self, target: BoardPosition) -> bool {
         let opponent_present = self
             .opponent_pieces()
             .get(target.0 as usize)
@@ -403,6 +487,39 @@ impl DenseBoard {
                 .is_some();
             !self_present
         }
+    }
+    /// Decide whethe a pair may be placed at the indicated position.
+    ///
+    /// This is only allowed if the position is completely empty.
+    fn is_empty(&self, target: BoardPosition) -> bool {
+        self.white.get(target.0 as usize).unwrap().is_none()
+            && self.black.get(target.0 as usize).unwrap().is_none()
+    }
+    /// Calculates all targets by sliding step by step in a given direction and stopping at the
+    /// first obstacle or at the end of the board.
+    fn slide_targets(
+        &self,
+        start: BoardPosition,
+        (dx, dy): (i8, i8),
+        is_pair: bool,
+    ) -> Vec<BoardPosition> {
+        let mut possible_moves = Vec::new();
+        let mut slide = start.add((dx, dy));
+
+        // This while loop leaves if we drop off the board or if we hit a target.
+        // The is_pair parameter determines, if the first thing we hit is a valid target.
+        while let Some(target) = slide {
+            if self.is_empty(target) {
+                possible_moves.push(target);
+                slide = target.add((dx, dy));
+            } else if !is_pair && self.can_place_single_at(target) {
+                possible_moves.push(target);
+                slide = None;
+            } else {
+                slide = None;
+            }
+        }
+        possible_moves
     }
 }
 
@@ -426,17 +543,18 @@ impl PacoBoard for DenseBoard {
                 // the player currently lifts a piece, we calculate all possible positions where
                 // it can be placed down. This takes opponents pieces in considerations but won't
                 // discard chaining into a blocked pawn (or simmilar).
-                self.place_targets(position, piece)
+                self.place_targets(position, piece, false)
                     .iter()
                     .map(|p| Place(*p))
                     .collect()
             }
             Hand::Pair {
                 piece, position, ..
-            } => {
-                // TODO
-                vec![]
-            }
+            } => self
+                .place_targets(position, piece, true)
+                .iter()
+                .map(|p| Place(*p))
+                .collect(),
         }
     }
 }
