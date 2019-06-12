@@ -118,7 +118,7 @@ impl BoardPosition {
         Self(x + 8 * y)
     }
     fn new_checked(x: i8, y: i8) -> Option<Self> {
-        if x >= 0 && y >= 0 && x < 7 && y < 8 {
+        if x >= 0 && y >= 0 && x < 8 && y < 8 {
             Some(Self::new(x as u8, y as u8))
         } else {
             None
@@ -643,28 +643,38 @@ impl Display for DenseBoard {
 }
 
 fn main() -> Result<(), PacoError> {
-    use PacoAction::*;
+    // use PacoAction::*;
     println!("Initial Board layout: ");
-    let mut board = DenseBoard::new();
-    println!("{}", board);
-    board.execute(Lift(BoardPosition::new(3, 1)))?;
-    println!("{}", board);
-    board.execute(Place(BoardPosition::new(3, 3)))?;
-    println!("{}", board);
-    // Show possible moves of the black knight on b8.
-    board.execute(Lift(BoardPosition::new(1, 7)))?;
-    println!("{}", board);
-
-    // This may not be legal, but we want to try moving pairs.
-    board.execute(Place(BoardPosition::new(3, 3)))?;
-    println!("{}", board);
-
-    board.execute(Lift(BoardPosition::new(3, 3)))?;
-    println!("{}", board);
-    board.execute(Place(BoardPosition::new(3, 4)))?;
-    println!("{}", board);
+    // let mut board = DenseBoard::new();
+    // println!("{}", board);
+    // board.execute(Lift(BoardPosition::new(7, 1)))?;
+    // println!("{}", board);
 
     // println!("{:?}", board.actions());
+
+    naive_random_play(10)?;
+
     Ok(())
 }
 
+fn naive_random_play(n: usize) -> Result<(), PacoError> {
+    use rand::seq::SliceRandom;
+    use rand::thread_rng;
+
+    let mut rng = thread_rng();
+
+    let mut board = DenseBoard::new();
+    println!("{}", board);
+    for _ in 0..n {
+        let actions = board.actions();
+        if let Some(action) = actions.choose(&mut rng) {
+            println!("{:?}", action);
+            board.execute(*action)?;
+        } else {
+            println!("early return");
+        }
+    }
+    println!("{}", board);
+
+    Ok(())
+}
