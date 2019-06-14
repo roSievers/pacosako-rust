@@ -6,7 +6,16 @@ use std::fmt;
 use std::fmt::Debug;
 use std::fmt::Display;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+
+use std::collections::HashMap;
+
+use std::collections::hash_map::Entry;
+
+use std::collections::HashSet;
+
+use std::collections::VecDeque;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 enum PieceType {
     Pawn,
     Rock,
@@ -16,7 +25,7 @@ enum PieceType {
     King,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 enum PlayerColor {
     White,
     Black,
@@ -68,7 +77,7 @@ impl PieceType {
 }
 
 /// In a DenseBoard we reserve memory for all positions.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 struct DenseBoard {
     white: Vec<Option<PieceType>>,
     black: Vec<Option<PieceType>>,
@@ -79,7 +88,7 @@ struct DenseBoard {
 
 /// Represents zero to two lifted pieces
 /// The owner of the pieces must be tracked externally, usually this will be the current player.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 enum Hand {
     Empty,
     Single {
@@ -104,7 +113,7 @@ impl Hand {
     }
 }
 
-#[derive(Copy, Clone, PartialEq, Eq)]
+#[derive(Copy, Clone, PartialEq, Eq, Hash)]
 struct BoardPosition(u8);
 
 impl BoardPosition {
@@ -159,14 +168,21 @@ enum PacoAction {
     Place(BoardPosition),
 }
 
+// A PacoMove is a is a sequence of legal actions Lift(p1), Place(p2), Place(p3), ..
+/// which leaves the board with an empty hand.
+type PacoMove = Vec<PacoAction>;
+
 /// The PacoBoard trait encapsulates arbitrary Board implementations.
-trait PacoBoard {
+trait PacoBoard: Clone + Eq + std::hash::Hash {
     /// Check if a PacoAction is legal and execute it. Otherwise return an error.
     fn execute(&mut self, action: PacoAction) -> Result<&mut Self, PacoError>;
     /// List all actions that can be executed in the current state. Note that actions which leave
     /// the board in a deadend state (like lifting up a pawn that is blocked) should be included
     /// in the list as well.
     fn actions(&self) -> Vec<PacoAction>;
+    /// A Paco Board is settled, if no piece is in the hand of the active player.
+    /// Calling `.actions()` on a settled board should only return lift actions.
+    fn is_settled(&self) -> bool;
 }
 
 impl DenseBoard {
@@ -211,6 +227,18 @@ impl DenseBoard {
         );
 
         result
+    }
+
+    /// Creates an empty board without any figures. This is convenient to investigate
+    /// simpler positions without all pieces.
+    fn empty() -> Self {
+        DenseBoard {
+            white: vec![None; 64],
+            black: vec![None; 64],
+            dance: vec![false; 64],
+            current_player: PlayerColor::White,
+            lifted_piece: Hand::Empty,
+        }
     }
 
     /// Lifts the piece of the current player in the given position of the board.
@@ -557,6 +585,9 @@ impl PacoBoard for DenseBoard {
                 .collect(),
         }
     }
+    fn is_settled(&self) -> bool {
+        self.lifted_piece == Hand::Empty
+    }
 }
 
 
@@ -643,16 +674,32 @@ impl Display for DenseBoard {
 }
 
 fn main() -> Result<(), PacoError> {
-    // use PacoAction::*;
-    println!("Initial Board layout: ");
-    // let mut board = DenseBoard::new();
-    // println!("{}", board);
-    // board.execute(Lift(BoardPosition::new(7, 1)))?;
-    // println!("{}", board);
+    //naive_random_play(10)?;
 
-    // println!("{:?}", board.actions());
+    investigate_move_analysis()?;
 
-    naive_random_play(10)?;
+    Ok(())
+}
+
+fn investigate_move_analysis() -> Result<(), PacoError> {
+    use std::mem::replace;
+    let mut board = DenseBoard::empty();
+    replace(&mut board.white[0], Some(PieceType::Bishop));
+    replace(&mut board.white[9], Some(PieceType::Pawn));
+    replace(&mut board.black[9], Some(PieceType::Pawn));
+    replace(&mut board.white[18], Some(PieceType::Pawn));
+    replace(&mut board.black[18], Some(PieceType::Pawn));
+
+    println!("Initial position: ");
+    println!("{}", board);
+    println!();
+
+    for (m, board) in determine_all_moves(board)? {
+        println!("Moves: {:?}", m);
+        println!("{}", board);
+        println!();
+    }
+
 
     Ok(())
 }
@@ -677,4 +724,65 @@ fn naive_random_play(n: usize) -> Result<(), PacoError> {
     println!("{}", board);
 
     Ok(())
+}
+
+/// Defines an algorithm that determines all moves.
+/// A move is a sequence of legal actions Lift(p1), Place(p2), Place(p3), ..
+/// which ends with an empty hand.
+///
+/// Essentially I am investigating a finite, possibly cyclic, directed graph where some nodes
+/// are marked (settled boards) and I wish to find all acyclic paths from the root to these
+/// marked (settled) nodes.
+fn determine_all_moves<T: PacoBoard + Debug>(board: T) -> Result<Vec<(PacoMove, T)>, PacoError> {
+    let mut todo_list: VecDeque<T> = VecDeque::new();
+    let mut settled: HashSet<T> = HashSet::new();
+    let mut found_via: HashMap<T, Vec<(PacoAction, Option<T>)>> = HashMap::new();
+
+    // Put all starting moves into the initialisation
+    for action in board.actions() {
+        let mut b = board.clone();
+        b.execute(action)?;
+        found_via
+            .entry(b.clone())
+            .and_modify(|v| v.push((action, None)))
+            .or_insert_with(|| vec![(action, None)]);
+        todo_list.push_back(b);
+    }
+
+    // Pull entries from the todo_list until it is empty.
+    while let Some(todo) = todo_list.pop_front() {
+        // Execute all actions and look at the resulting board state.
+        for action in todo.actions() {
+            let mut b = todo.clone();
+            b.execute(action)?;
+            // look up if this action has already been found.
+            match found_via.entry(b.clone()) {
+                // We have seen this state already and don't need to add it to the todo list.
+                Entry::Occupied(mut o_entry) => {
+                    // TODO: Check for a cycle.
+                    o_entry.get_mut().push((action, Some(todo.clone())));
+                }
+                // We encounter this state for the first time.
+                Entry::Vacant(v_entry) => {
+                    v_entry.insert(vec![(action, Some(todo.clone()))]);
+                    if b.is_settled() {
+                        // The state is settled, we don't look at the following moves.
+                        settled.insert(b);
+                    } else {
+                        // We will look at the possible chain moves later.
+                        todo_list.push_back(b);
+                    }
+                }
+            }
+        }
+    }
+
+    // Work in progress..
+    let mut result = Vec::new();
+
+    for end_state in settled {
+        result.push((vec![], end_state));
+    }
+
+    Ok(result)
 }
