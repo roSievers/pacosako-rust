@@ -1,4 +1,6 @@
 
+mod parser;
+mod types;
 use colored::*;
 
 use std::fmt;
@@ -15,21 +17,7 @@ use std::collections::HashSet;
 
 use std::collections::VecDeque;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-enum PieceType {
-    Pawn,
-    Rock,
-    Knight,
-    Bishop,
-    Queen,
-    King,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-enum PlayerColor {
-    White,
-    Black,
-}
+use types::{BoardPosition, PieceType, PlayerColor};
 
 #[derive(Clone, Debug)]
 enum PacoError {
@@ -110,51 +98,6 @@ impl Hand {
             Single { position, .. } => Some(*position),
             Pair { position, .. } => Some(*position),
         }
-    }
-}
-
-#[derive(Copy, Clone, PartialEq, Eq, Hash)]
-struct BoardPosition(u8);
-
-impl BoardPosition {
-    fn x(self) -> u8 {
-        self.0 % 8
-    }
-    fn y(self) -> u8 {
-        self.0 / 8
-    }
-    fn new(x: u8, y: u8) -> Self {
-        Self(x + 8 * y)
-    }
-    fn new_checked(x: i8, y: i8) -> Option<Self> {
-        if x >= 0 && y >= 0 && x < 8 && y < 8 {
-            Some(Self::new(x as u8, y as u8))
-        } else {
-            None
-        }
-    }
-    fn add(self, other: (i8, i8)) -> Option<Self> {
-        Self::new_checked(self.x() as i8 + other.0, self.y() as i8 + other.1)
-    }
-}
-
-/// The debug output for a position is a string like d4 that is easily human readable.
-impl Debug for BoardPosition {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "{}{}",
-            ["a", "b", "c", "d", "e", "f", "g", "h"][self.x() as usize],
-            self.y() + 1
-        )
-    }
-}
-
-/// The display output for a position is a string like d4 that is easily human readable.
-/// The Display implementation just wraps the Debug implementation.
-impl Display for BoardPosition {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:?}", self)
     }
 }
 
@@ -239,6 +182,19 @@ impl DenseBoard {
             current_player: PlayerColor::White,
             lifted_piece: Hand::Empty,
         }
+    }
+
+    fn from_squares(squares: HashMap<BoardPosition, parser::Square>) -> Self {
+        let mut result = Self::empty();
+        for (position, square) in squares.iter() {
+            if let Some(piece_type) = square.white {
+                *result.white.get_mut(position.0 as usize).unwrap() = Some(piece_type);
+            }
+            if let Some(piece_type) = square.black {
+                *result.black.get_mut(position.0 as usize).unwrap() = Some(piece_type);
+            }
+        }
+        result
     }
 
     /// Lifts the piece of the current player in the given position of the board.
@@ -673,10 +629,36 @@ impl Display for DenseBoard {
 
 }
 
+// fn supermove_example() -> DenseBoard {
+
+// }
+
 fn main() -> Result<(), PacoError> {
+
+    println!("Initial position: ");
+    println!("{}", DenseBoard::new());
+
+    let schema = "8 .. .. .B BR .K .. .. ..
+7 .P .. .. .P .. .. .P ..
+6 .. PP .. .. .N QR .. ..
+5 BB .. .. NP .. .P .. .P
+4 P. PN .. .. .. PP .. P.
+3 .. .. .. .. .Q .. .. ..
+2 .. .. N. P. .. P. P. ..
+1 .. R. .. .. .. R. K. ..
+* A  B  C  D  E  F  G  H";
+
+    let parsed = parser::matrix(schema);
+
+    println!("{:?}", parsed);
+
+    if let Ok((_, matrix)) = parsed {
+        println!("{}", DenseBoard::from_squares(matrix.0));
+    }
+
     //naive_random_play(10)?;
 
-    investigate_move_analysis()?;
+    // investigate_move_analysis()?;
 
     Ok(())
 }
