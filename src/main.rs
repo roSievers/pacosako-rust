@@ -418,14 +418,14 @@ impl DenseBoard {
     /// Calculates all possible placement targets for a queen at the given position.
     fn place_targets_queen(&self, position: BoardPosition, is_pair: bool) -> Vec<BoardPosition> {
         let directions = vec![
-            (1, 2),
-            (2, 1),
-            (2, -1),
-            (1, -2),
-            (-1, -2),
-            (-2, -1),
-            (-2, 1),
-            (-1, 2),
+            (0, 1),
+            (1, 1),
+            (1, 0),
+            (1, -1),
+            (0, -1),
+            (-1, -1),
+            (-1, 0),
+            (-1, 1),
         ];
         directions
             .iter()
@@ -653,8 +653,29 @@ fn main() -> Result<(), PacoError> {
     println!("{:?}", parsed);
 
     if let Ok((_, matrix)) = parsed {
-        println!("{}", DenseBoard::from_squares(matrix.0));
+        let board = DenseBoard::from_squares(matrix.0);
+        println!("{}", board);
+
+        let all_moves = determine_all_moves(board)?;
+        println!(
+            "I found {} possible resulting states in total.",
+            all_moves.len()
+        );
+
+        // Is there a state where the black king is dancing?
+        for (_, board) in all_moves {
+            let (king_pos, _) = board
+                .black
+                .iter()
+                .enumerate()
+                .find(|&(_, &p)| p == Some(PieceType::King))
+                .unwrap();
+            if board.white[king_pos].is_some() {
+                println!("{}", board);
+            }
+        }
     }
+
 
     //naive_random_play(10)?;
 
