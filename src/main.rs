@@ -650,8 +650,6 @@ fn main() -> Result<(), PacoError> {
 
     let parsed = parser::matrix(schema);
 
-    println!("{:?}", parsed);
-
     if let Ok((_, matrix)) = parsed {
         let board = DenseBoard::from_squares(matrix.0);
         println!("{}", board);
@@ -676,55 +674,9 @@ fn main() -> Result<(), PacoError> {
         }
     }
 
-
     //naive_random_play(10)?;
 
     // investigate_move_analysis()?;
-
-    Ok(())
-}
-
-fn investigate_move_analysis() -> Result<(), PacoError> {
-    use std::mem::replace;
-    let mut board = DenseBoard::empty();
-    replace(&mut board.white[0], Some(PieceType::Bishop));
-    replace(&mut board.white[9], Some(PieceType::Pawn));
-    replace(&mut board.black[9], Some(PieceType::Pawn));
-    replace(&mut board.white[18], Some(PieceType::Pawn));
-    replace(&mut board.black[18], Some(PieceType::Pawn));
-
-    println!("Initial position: ");
-    println!("{}", board);
-    println!();
-
-    for (m, board) in determine_all_moves(board)? {
-        println!("Moves: {:?}", m);
-        println!("{}", board);
-        println!();
-    }
-
-
-    Ok(())
-}
-
-fn naive_random_play(n: usize) -> Result<(), PacoError> {
-    use rand::seq::SliceRandom;
-    use rand::thread_rng;
-
-    let mut rng = thread_rng();
-
-    let mut board = DenseBoard::new();
-    println!("{}", board);
-    for _ in 0..n {
-        let actions = board.actions();
-        if let Some(action) = actions.choose(&mut rng) {
-            println!("{:?}", action);
-            board.execute(*action)?;
-        } else {
-            println!("early return");
-        }
-    }
-    println!("{}", board);
 
     Ok(())
 }
