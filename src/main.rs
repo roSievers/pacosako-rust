@@ -123,6 +123,7 @@ trait PacoBoard: Clone + Eq + std::hash::Hash + Display {
     fn is_settled(&self) -> bool;
     /// Determines if the King of a given color is united with an opponent piece.
     fn king_in_union(&self, color: PlayerColor) -> bool;
+    fn current_player(&self) -> PlayerColor;
 }
 
 impl DenseBoard {
@@ -553,6 +554,9 @@ impl PacoBoard for DenseBoard {
 
         self.pieces_of_color(color.other())[king_pos].is_some()
     }
+    fn current_player(&self) -> PlayerColor {
+        self.current_player
+    }
 }
 
 
@@ -769,5 +773,59 @@ fn trace_first_move<T: PacoBoard>(
             trace.reverse();
             return Some(trace);
         }
+    }
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use parser::Square;
+
+    fn find_sako_states<T: PacoBoard>(board: T) -> Result<Vec<T>, PacoError> {
+        let opponent = board.current_player().other();
+
+        Ok(determine_all_moves(board)?
+            .settled
+            .drain()
+            .filter(|b| b.king_in_union(opponent))
+            .collect())
+    }
+
+    #[test]
+    fn test_simple_sako() {
+        let mut squares = HashMap::new();
+        squares.insert(BoardPosition::new(2, 3), Square::white(PieceType::Bishop));
+        squares.insert(BoardPosition::new(5, 6), Square::black(PieceType::King));
+
+        let sako_states = find_sako_states(DenseBoard::from_squares(squares)).unwrap();
+
+        assert_eq!(sako_states.len(), 1);
+    }
+
+    #[test]
+    fn test_simple_non_sako() {
+        let mut squares = HashMap::new();
+        squares.insert(BoardPosition::new(2, 3), Square::white(PieceType::Bishop));
+        squares.insert(BoardPosition::new(5, 7), Square::black(PieceType::King));
+
+        let sako_states = find_sako_states(DenseBoard::from_squares(squares)).unwrap();
+
+        assert_eq!(sako_states.len(), 0);
+    }
+
+    #[test]
+    fn test_chain_sako() {
+        let mut squares = HashMap::new();
+        squares.insert(BoardPosition::new(2, 3), Square::white(PieceType::Bishop));
+        squares.insert(
+            BoardPosition::new(5, 6),
+            Square::pair(PieceType::Rock, PieceType::Pawn),
+        );
+        squares.insert(BoardPosition::new(5, 4), Square::black(PieceType::King));
+
+        let sako_states = find_sako_states(DenseBoard::from_squares(squares)).unwrap();
+
+        assert_eq!(sako_states.len(), 1);
     }
 }

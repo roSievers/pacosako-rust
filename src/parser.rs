@@ -28,6 +28,27 @@ pub struct Square {
     pub black: Option<PieceType>,
 }
 
+impl Square {
+    pub fn pair(white: PieceType, black: PieceType) -> Self {
+        Square {
+            white: Some(white),
+            black: Some(black),
+        }
+    }
+    pub fn white(white: PieceType) -> Self {
+        Square {
+            white: Some(white),
+            black: None,
+        }
+    }
+    pub fn black(black: PieceType) -> Self {
+        Square {
+            white: None,
+            black: Some(black),
+        }
+    }
+}
+
 fn matrix_transform(input: Vec<(u8, Vec<Square>)>) -> Matrix {
     let mut matrix = HashMap::new();
 
