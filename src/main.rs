@@ -273,20 +273,22 @@ impl DenseBoard {
         }
     }
 
-    /// The Dense Board representation containing only pieces of the current player.
-    fn active_pieces(&self) -> &Vec<Option<PieceType>> {
-        match self.current_player {
+    /// The Dense Board representation containing only pieces of the given color.
+    fn pieces_of_color(&self, color: PlayerColor) -> &Vec<Option<PieceType>> {
+        match color {
             PlayerColor::White => &self.white,
             PlayerColor::Black => &self.black,
         }
     }
 
+    /// The Dense Board representation containing only pieces of the current player.
+    fn active_pieces(&self) -> &Vec<Option<PieceType>> {
+        self.pieces_of_color(self.current_player)
+    }
+
     /// The Dense Board representation containing only pieces of the opponent player.
     fn opponent_pieces(&self) -> &Vec<Option<PieceType>> {
-        match self.current_player {
-            PlayerColor::White => &self.black,
-            PlayerColor::Black => &self.white,
-        }
+        self.pieces_of_color(self.current_player.other())
     }
 
     /// The Dense Board representation containing only pieces of the current player.
@@ -543,13 +545,13 @@ impl PacoBoard for DenseBoard {
     }
     fn king_in_union(&self, color: PlayerColor) -> bool {
         let (king_pos, _) = self
-            .black
+            .pieces_of_color(color)
             .iter()
             .enumerate()
             .find(|&(_, &p)| p == Some(PieceType::King))
             .unwrap();
 
-        self.white[king_pos].is_some()
+        self.pieces_of_color(color.other())[king_pos].is_some()
     }
 }
 
