@@ -5,7 +5,6 @@ use colored::*;
 
 use std::fmt;
 
-use std::fmt::Debug;
 use std::fmt::Display;
 
 
@@ -111,12 +110,8 @@ enum PacoAction {
     Place(BoardPosition),
 }
 
-// A PacoMove is a is a sequence of legal actions Lift(p1), Place(p2), Place(p3), ..
-/// which leaves the board with an empty hand.
-type PacoMove = Vec<PacoAction>;
-
 /// The PacoBoard trait encapsulates arbitrary Board implementations.
-trait PacoBoard: Clone + Eq + std::hash::Hash {
+trait PacoBoard: Clone + Eq + std::hash::Hash + Display {
     /// Check if a PacoAction is legal and execute it. Otherwise return an error.
     fn execute(&mut self, action: PacoAction) -> Result<&mut Self, PacoError>;
     /// List all actions that can be executed in the current state. Note that actions which leave
@@ -126,6 +121,8 @@ trait PacoBoard: Clone + Eq + std::hash::Hash {
     /// A Paco Board is settled, if no piece is in the hand of the active player.
     /// Calling `.actions()` on a settled board should only return lift actions.
     fn is_settled(&self) -> bool;
+    /// Determines if the King of a given color is united with an opponent piece.
+    fn king_in_union(&self, color: PlayerColor) -> bool;
 }
 
 impl DenseBoard {
@@ -544,6 +541,16 @@ impl PacoBoard for DenseBoard {
     fn is_settled(&self) -> bool {
         self.lifted_piece == Hand::Empty
     }
+    fn king_in_union(&self, color: PlayerColor) -> bool {
+        let (king_pos, _) = self
+            .black
+            .iter()
+            .enumerate()
+            .find(|&(_, &p)| p == Some(PieceType::King))
+            .unwrap();
+
+        self.white[king_pos].is_some()
+    }
 }
 
 
@@ -578,7 +585,7 @@ impl Display for DenseBoard {
                         write!(f, "{}", White.paint_string(piece.to_char()))?;
                     }
                     None => {
-                        write!(f, "{}", " ".underline())?;
+                        write!(f, ".")?;
                     }
                 };
 
@@ -587,7 +594,7 @@ impl Display for DenseBoard {
                         write!(f, "{}", Black.paint_string(piece.to_char()))?;
                     }
                     None => {
-                        write!(f, "{}", " ".underline())?;
+                        write!(f, ".")?;
                     }
                 };
             }
@@ -635,9 +642,6 @@ impl Display for DenseBoard {
 
 fn main() -> Result<(), PacoError> {
 
-    println!("Initial position: ");
-    println!("{}", DenseBoard::new());
-
     let schema = "8 .. .. .B BR .K .. .. ..
 7 .P .. .. .P .. .. .P ..
 6 .. PP .. .. .N QR .. ..
@@ -651,34 +655,39 @@ fn main() -> Result<(), PacoError> {
     let parsed = parser::matrix(schema);
 
     if let Ok((_, matrix)) = parsed {
-        let board = DenseBoard::from_squares(matrix.0);
-        println!("{}", board);
+        analyse_sako(DenseBoard::from_squares(matrix.0))?;
+    }
 
-        let all_moves = determine_all_moves(board)?;
-        println!(
-            "I found {} possible resulting states in total.",
-            all_moves.len()
-        );
+    Ok(())
+}
 
-        // Is there a state where the black king is dancing?
-        for (_, board) in all_moves {
-            let (king_pos, _) = board
-                .black
-                .iter()
-                .enumerate()
-                .find(|&(_, &p)| p == Some(PieceType::King))
-                .unwrap();
-            if board.white[king_pos].is_some() {
-                println!("{}", board);
-            }
+/// Given a board state, this function finds all possible end states where a piece dances with the
+/// opponent's king.
+fn analyse_sako(board: impl PacoBoard) -> Result<(), PacoError> {
+    println!("The input board position is");
+    println!("{}", board);
+
+    let explored = determine_all_moves(board)?;
+    println!(
+        "I found {} possible resulting states in total.",
+        explored.settled.len()
+    );
+
+    println!("I found the following ŝako sequences:");
+    // Is there a state where the black king is dancing?
+    for board in explored.settled {
+        if board.king_in_union(PlayerColor::Black) {
+            println!("{}", board);
+            println!("{:?}", trace_first_move(&board, &explored.found_via));
         }
     }
 
-    //naive_random_play(10)?;
-
-    // investigate_move_analysis()?;
-
     Ok(())
+}
+
+struct ExploredState<T: PacoBoard> {
+    settled: HashSet<T>,
+    found_via: HashMap<T, Vec<(PacoAction, Option<T>)>>,
 }
 
 /// Defines an algorithm that determines all moves.
@@ -688,7 +697,7 @@ fn main() -> Result<(), PacoError> {
 /// Essentially I am investigating a finite, possibly cyclic, directed graph where some nodes
 /// are marked (settled boards) and I wish to find all acyclic paths from the root to these
 /// marked (settled) nodes.
-fn determine_all_moves<T: PacoBoard + Debug>(board: T) -> Result<Vec<(PacoMove, T)>, PacoError> {
+fn determine_all_moves<T: PacoBoard>(board: T) -> Result<ExploredState<T>, PacoError> {
     let mut todo_list: VecDeque<T> = VecDeque::new();
     let mut settled: HashSet<T> = HashSet::new();
     let mut found_via: HashMap<T, Vec<(PacoAction, Option<T>)>> = HashMap::new();
@@ -732,12 +741,31 @@ fn determine_all_moves<T: PacoBoard + Debug>(board: T) -> Result<Vec<(PacoMove, 
         }
     }
 
-    // Work in progress..
-    let mut result = Vec::new();
+    Ok(ExploredState { settled, found_via })
+}
 
-    for end_state in settled {
-        result.push((vec![], end_state));
+/// Traces a action sequence to the `target` state via the `found_via` map.
+/// Note that this sequence is not uniqe. This function returns the "first" where "first"
+/// depends on the order in which actions were determined.
+/// Termination of this function depends on implementation details of `determine_all_moves`.
+/// Returns None when no path can be found.
+fn trace_first_move<T: PacoBoard>(
+    target: &T,
+    found_via: &HashMap<T, Vec<(PacoAction, Option<T>)>>,
+) -> Option<Vec<PacoAction>> {
+    let mut trace: Vec<PacoAction> = Vec::new();
+
+    let mut pivot = target;
+
+    loop {
+        let parents = found_via.get(pivot)?;
+        let (action, parent) = parents.get(0)?;
+        trace.push(*action);
+        if let Some(p) = parent {
+            pivot = p;
+        } else {
+            trace.reverse();
+            return Some(trace);
+        }
     }
-
-    Ok(result)
 }
