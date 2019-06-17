@@ -71,6 +71,8 @@ struct DenseBoard {
     dance: Vec<bool>,
     current_player: PlayerColor,
     lifted_piece: Hand,
+    /// When a pawn is moved two squares forward, the square in between is used to check en passant.
+    en_passant: Option<BoardPosition>,
 }
 
 /// Represents zero to two lifted pieces
@@ -127,6 +129,7 @@ trait PacoBoard: Clone + Eq + std::hash::Hash + Display {
 }
 
 impl DenseBoard {
+    #[allow(dead_code)]
     fn new() -> Self {
         use PieceType::*;
         let mut result: Self = DenseBoard {
@@ -135,6 +138,7 @@ impl DenseBoard {
             dance: vec![false; 64],
             current_player: PlayerColor::White,
             lifted_piece: Hand::Empty,
+            en_passant: None,
         };
 
         // Board structure
@@ -179,6 +183,7 @@ impl DenseBoard {
             dance: vec![false; 64],
             current_player: PlayerColor::White,
             lifted_piece: Hand::Empty,
+            en_passant: None,
         }
     }
 
@@ -238,7 +243,22 @@ impl DenseBoard {
     fn place(&mut self, target: BoardPosition) -> Result<&mut Self, PacoError> {
         match self.lifted_piece {
             Hand::Empty => Err(PacoError::PlaceEmptyHand),
-            Hand::Single { piece, .. } => {
+            Hand::Single { piece, position } => {
+                // If the target position is the current en passant square, pull back the opponent pawn.
+                // We can't just assume that a pawn placed on the en passant square is striking
+                // en passant, as the current player may also free their own pawn from a union.
+                if self.en_passant == Some(target)
+                    && piece == PieceType::Pawn
+                    && position.advance_pawn(self.current_player) != Some(target)
+                {
+                    let en_passant_source_square = target
+                        .advance_pawn(self.current_player().other())
+                        .unwrap()
+                        .0 as usize;
+                    self.white.swap(target.0 as usize, en_passant_source_square);
+                    self.black.swap(target.0 as usize, en_passant_source_square);
+                }
+
                 // Read piece currently on the board at the target position and place the
                 // held piece there.
                 let board_piece = *self.active_pieces().get(target.0 as usize).unwrap();
@@ -249,18 +269,46 @@ impl DenseBoard {
                         position: target,
                     };
                 } else {
+                    // If a pawn is advanced two steps from the home row, store en passant information.
+                    if piece == PieceType::Pawn
+                        && position.in_pawn_row(self.current_player)
+                        && (target.y() as i8 - position.y() as i8).abs() == 2
+                    {
+                        // Store en passant information.
+                        // Note that the meaning of `None` changes from "could not advance pawn"
+                        // to "capture en passant is not possible". This is fine as we checked
+                        // `in_pawn_row` first and are sure this won't happen.
+                        self.en_passant = position.advance_pawn(self.current_player);
+                    }
+
                     self.lifted_piece = Hand::Empty;
                     self.current_player = self.current_player.other();
                 }
                 Ok(self)
             }
-            Hand::Pair { piece, partner, .. } => {
+            Hand::Pair {
+                piece,
+                partner,
+                position,
+            } => {
                 let board_piece = self.active_pieces().get(target.0 as usize).unwrap();
                 let board_partner = self.opponent_pieces().get(target.0 as usize).unwrap();
 
                 if board_piece.is_some() || board_partner.is_some() {
                     Err(PacoError::PlacePairFullPosition)
                 } else {
+                    // If a pawn is advanced two steps from the home row, store en passant information.
+                    if piece == PieceType::Pawn
+                        && position.in_pawn_row(self.current_player)
+                        && (target.y() as i8 - position.y() as i8).abs() == 2
+                    {
+                        // Store en passant information.
+                        // Note that the meaning of `None` changes from "could not advance pawn"
+                        // to "capture en passant is not possible". This is fine as we checked
+                        // `in_pawn_row` first and are sure this won't happen.
+                        self.en_passant = position.advance_pawn(self.current_player);
+                    }
+
                     *self.active_pieces_mut().get_mut(target.0 as usize).unwrap() = Some(piece);
                     *self
                         .opponent_pieces_mut()
@@ -351,10 +399,8 @@ impl DenseBoard {
             let strike_directions = [(-1, forward), (1, forward)];
             let targets_on_board = strike_directions.iter().filter_map(|d| position.add(*d));
 
-            // TODO: The filter function can be more performant by directly checking
-            // "opponent_present" instead.
             targets_on_board
-                .filter(|p| self.can_place_single_at(*p) && !self.is_empty(*p))
+                .filter(|p| self.opponent_present(*p) || self.en_passant == Some(*p))
                 .for_each(|p| possible_moves.push(p));
         }
 
@@ -456,21 +502,21 @@ impl DenseBoard {
     /// This is only forbidden when the target position holds a piece of the own color
     /// without a dance partner.
     fn can_place_single_at(&self, target: BoardPosition) -> bool {
-        let opponent_present = self
-            .opponent_pieces()
+        self.opponent_present(target) || !self.active_piece_present(target)
+    }
+    /// Is there an opponent (i.e. a piece of current_player.other()) at the target location?
+    fn opponent_present(&self, target: BoardPosition) -> bool {
+        self.opponent_pieces()
             .get(target.0 as usize)
             .unwrap()
-            .is_some();
-        if opponent_present {
-            true
-        } else {
-            let self_present = self
-                .active_pieces()
-                .get(target.0 as usize)
-                .unwrap()
-                .is_some();
-            !self_present
-        }
+            .is_some()
+    }
+    /// Is there a piece of the current player at the target location?
+    fn active_piece_present(&self, target: BoardPosition) -> bool {
+        self.active_pieces()
+            .get(target.0 as usize)
+            .unwrap()
+            .is_some()
     }
     /// Decide whethe a pair may be placed at the indicated position.
     ///
@@ -827,5 +873,49 @@ mod tests {
         let sako_states = find_sako_states(DenseBoard::from_squares(squares)).unwrap();
 
         assert_eq!(sako_states.len(), 1);
+    }
+
+    #[test]
+    fn test_en_passant() {
+        use PieceType::Pawn;
+
+        // Setup a situaltion where en passant can happen.
+        let mut squares = HashMap::new();
+        // White pawn that moves two squares forward
+        squares.insert(BoardPosition::new(3, 1), Square::white(Pawn));
+        // Black pawn that will unite en passant
+        squares.insert(BoardPosition::new(4, 3), Square::black(Pawn));
+        // White pawn to block the black pawn from advancing, reducing the black action space.
+        squares.insert(BoardPosition::new(4, 2), Square::white(Pawn));
+        let mut board = DenseBoard::from_squares(squares);
+
+        // Advance the white pawn and lift the black pawn.
+        board
+            .execute(PacoAction::Lift(BoardPosition::new(3, 1)))
+            .unwrap()
+            .execute(PacoAction::Place(BoardPosition::new(3, 3)))
+            .unwrap()
+            .execute(PacoAction::Lift(BoardPosition::new(4, 3)))
+            .unwrap();
+
+        // Check if the correct legal moves are returned
+        assert_eq!(
+            board.actions(),
+            vec![PacoAction::Place(BoardPosition::new(3, 2))]
+        );
+
+        // Execute en passant union
+        board
+            .execute(PacoAction::Place(BoardPosition::new(3, 2)))
+            .unwrap();
+
+        // Check if the target pawn was indeed united.
+        assert_eq!(
+            *board
+                .white
+                .get(BoardPosition::new(3, 2).0 as usize)
+                .unwrap(),
+            Some(Pawn)
+        );
     }
 }

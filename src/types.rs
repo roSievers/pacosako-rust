@@ -43,6 +43,24 @@ impl BoardPosition {
     pub fn add(self, other: (i8, i8)) -> Option<Self> {
         Self::new_checked(self.x() as i8 + other.0, self.y() as i8 + other.1)
     }
+    /// Indicates whether the given position in on the pawn row of the `player` parameter.
+    pub fn in_pawn_row(self, player: PlayerColor) -> bool {
+        use PlayerColor::*;
+        match player {
+            White => self.y() == 1,
+            Black => self.y() == 6,
+        }
+    }
+    /// Returns the position where a pawn would be after moving forward by one step.
+    /// This depends on the color of the active `player`.
+    /// Returns `None` if the pawn is already on the home row of the other player.
+    pub fn advance_pawn(self, player: PlayerColor) -> Option<Self> {
+        use PlayerColor::*;
+        match player {
+            White => Self::new_checked(self.x() as i8, self.y() as i8 + 1),
+            Black => Self::new_checked(self.x() as i8, self.y() as i8 + 1),
+        }
+    }
 }
 
 /// The debug output for a position is a string like d4 that is easily human readable.

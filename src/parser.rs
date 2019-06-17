@@ -1,6 +1,4 @@
-#[macro_use]
-
-use crate::types::{PieceType, BoardPosition};
+use crate::types::{BoardPosition, PieceType};
 
 use nom;
 use nom::{bytes::complete::tag, combinator::map_res, IResult};
