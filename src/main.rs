@@ -918,4 +918,28 @@ mod tests {
             Some(Pawn)
         );
     }
+
+    /// This test sets up a situation where a sako through a chain is possible using en passant.
+    #[test]
+    fn en_passant_chain_sako() {
+        use PieceType::*;
+
+        // Setup a situaltion where en passant can happen.
+        let mut squares = HashMap::new();
+        squares.insert(BoardPosition::new(2, 3), Square::black(Pawn));
+        squares.insert(BoardPosition::new(3, 1), Square::pair(Pawn, Knight));
+        squares.insert(BoardPosition::new(4, 0), Square::white(King));
+
+        let mut board = DenseBoard::from_squares(squares);
+        board
+            .execute(PacoAction::Lift(BoardPosition::new(3, 1)))
+            .unwrap()
+            .execute(PacoAction::Place(BoardPosition::new(3, 3)))
+            .unwrap();
+
+
+        let sako_states = find_sako_states(board).unwrap();
+
+        assert_eq!(sako_states.len(), 1);
+    }
 }
