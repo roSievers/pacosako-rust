@@ -1,14 +1,13 @@
 
 mod parser;
 mod types;
+
 use colored::*;
-
-use std::fmt;
-
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::collections::VecDeque;
+use std::fmt;
 use std::fmt::Display;
 use types::{BoardPosition, PieceType, PlayerColor};
 
