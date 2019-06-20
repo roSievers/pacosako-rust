@@ -43,6 +43,7 @@ impl BoardPosition {
     pub fn add(self, other: (i8, i8)) -> Option<Self> {
         Self::new_checked(self.x() as i8 + other.0, self.y() as i8 + other.1)
     }
+
     /// Indicates whether the given position in on the pawn row of the `player` parameter.
     pub fn in_pawn_row(self, player: PlayerColor) -> bool {
         use PlayerColor::*;
@@ -51,6 +52,19 @@ impl BoardPosition {
             Black => self.y() == 6,
         }
     }
+
+    /// If the position is on a players home row, return that player.
+    pub fn home_row(self) -> Option<PlayerColor> {
+        use PlayerColor::*;
+        if self.y() == 0 {
+            Some(White)
+        } else if self.y() == 7 {
+            Some(Black)
+        } else {
+            None
+        }
+    }
+
     /// Returns the position where a pawn would be after moving forward by one step.
     /// This depends on the color of the active `player`.
     /// Returns `None` if the pawn is already on the home row of the other player.
