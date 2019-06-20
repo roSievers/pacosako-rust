@@ -1,8 +1,10 @@
 
 use std::fmt;
 
+use std::convert::TryFrom;
 use std::fmt::Debug;
 use std::fmt::Display;
+
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum PieceType {
@@ -94,5 +96,50 @@ impl Debug for BoardPosition {
 impl Display for BoardPosition {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{:?}", self)
+    }
+}
+
+impl TryFrom<&str> for BoardPosition {
+    type Error = &'static str;
+
+    fn try_from(string: &str) -> Result<Self, Self::Error> {
+        // This is a closure to lazily
+        const ERROR_TEXT: &str =
+            "Error: I am looking for a board square coordinate like 'd5' or 'f2'.";
+
+        if string.len() != 2 {
+            Err(ERROR_TEXT)
+        } else {
+            let x = "abcdefgh".find(string.chars().nth(0).unwrap());
+            let y = "12345678".find(string.chars().nth(1).unwrap());
+            if x.is_none() || y.is_none() {
+                Err(ERROR_TEXT)
+            } else {
+                Self::new_checked(x.unwrap() as i8, y.unwrap() as i8).ok_or(ERROR_TEXT)
+            }
+        }
+    }
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// This test verifies the TryFrom<&str> implementation for BoardPosition.
+    #[test]
+    fn string_to_board_position() {
+        // Spot check a handfull of positions, note the offset due to 0 based indexing.
+        assert_eq!(BoardPosition::try_from("g7"), Ok(BoardPosition::new(6, 6)));
+        assert_eq!(BoardPosition::try_from("c4"), Ok(BoardPosition::new(2, 3)));
+        assert_eq!(BoardPosition::try_from("a1"), Ok(BoardPosition::new(0, 0)));
+        assert_eq!(BoardPosition::try_from("f2"), Ok(BoardPosition::new(5, 1)));
+        assert_eq!(BoardPosition::try_from("h6"), Ok(BoardPosition::new(7, 5)));
+
+        // Check a few error cases
+        assert!(BoardPosition::try_from("").is_err());
+        assert!(BoardPosition::try_from("a0").is_err());
+        assert!(BoardPosition::try_from("j4").is_err());
+        assert!(BoardPosition::try_from("c6a").is_err());
     }
 }
