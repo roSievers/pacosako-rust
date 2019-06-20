@@ -1,10 +1,34 @@
 language: rust
+sudo: required
 rust:
   - stable
   - beta
   - nightly
+
+addons:
+  apt:
+    packages:
+      - libssl-dev
+
 matrix:
   allow_failures:
     - rust: nightly
   fast_finish: true
+
 cache: cargo
+
+before_cache: |
+  if [[ "$TRAVIS_RUST_VERSION" == stable ]]; then
+    cargo install cargo-tarpaulin -f
+  fi
+
+script:
+- cargo clean
+- cargo build
+- cargo test
+
+after_success: |
+  if [[ "$TRAVIS_RUST_VERSION" == stable ]]; then
+    # Uncomment the following line for coveralls.io
+    cargo tarpaulin --ciserver travis-ci --coveralls $TRAVIS_JOB_ID
+  fi
