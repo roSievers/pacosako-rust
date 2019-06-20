@@ -11,6 +11,12 @@ use std::fmt;
 use std::fmt::Display;
 use types::{BoardPosition, PieceType, PlayerColor};
 
+#[cfg(test)]
+extern crate quickcheck;
+#[cfg(test)]
+#[macro_use(quickcheck)]
+extern crate quickcheck_macros;
+
 #[derive(Clone, Debug)]
 enum PacoError {
     /// You can not "Lift" when the hand is full.
@@ -76,6 +82,28 @@ struct DenseBoard {
     en_passant: Option<BoardPosition>,
     /// When a pawn is moved on the oppoments home row, you may promote it to any other piece.
     promotion: Option<BoardPosition>,
+    /// Stores castling information
+    castling: Castling,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+struct Castling {
+    white_queen_side: bool,
+    white_king_side: bool,
+    black_queen_side: bool,
+    black_king_side: bool,
+}
+
+impl Castling {
+    /// Returns an initial Castling structure where all castling is possible
+    fn new() -> Self {
+        Castling {
+            white_queen_side: true,
+            white_king_side: true,
+            black_queen_side: true,
+            black_king_side: true,
+        }
+    }
 }
 
 /// Represents zero to two lifted pieces
@@ -149,6 +177,7 @@ impl DenseBoard {
             lifted_piece: Hand::Empty,
             en_passant: None,
             promotion: None,
+            castling: Castling::new(),
         };
 
         // Board structure
@@ -195,6 +224,7 @@ impl DenseBoard {
             lifted_piece: Hand::Empty,
             en_passant: None,
             promotion: None,
+            castling: Castling::new(),
         }
     }
 
@@ -1066,5 +1096,67 @@ mod tests {
         let sako_states = find_sako_states(board).unwrap();
 
         assert_eq!(sako_states.len(), 1);
+    }
+
+    /// Tests if the white king side castleing is provided as an action when lifting the king.
+    // #[test]
+    // fn white_king_side_castle() {
+    //     use PieceType::*;
+
+    //     let mut squares = HashMap::new();
+    //     squares.insert("e1".try_into().unwrap(), Square::white(King));
+    //     squares.insert("h1".try_into().unwrap(), Square::white(Rock));
+    //     let mut board = DenseBoard::from_squares(squares);
+    //     board.castling.white_queen_side = false;
+
+    //     board
+    //         .execute(PacoAction::Lift("e1".try_into().unwrap()))
+    //         .unwrap();
+
+    //     assert!(board
+    //         .actions()
+    //         .contains(&PacoAction::Place("g1".try_into().unwrap())));
+    // }
+
+    /// Tests if the white king side castleing is blocked by an owned piece.
+    #[test]
+    fn white_king_side_castle_blocked_piece() {
+        use PieceType::*;
+
+        let mut squares = HashMap::new();
+        squares.insert("e1".try_into().unwrap(), Square::white(King));
+        squares.insert("f1".try_into().unwrap(), Square::white(Bishop));
+        squares.insert("h1".try_into().unwrap(), Square::white(Rock));
+        let mut board = DenseBoard::from_squares(squares);
+        board.castling.white_queen_side = false;
+
+        board
+            .execute(PacoAction::Lift("e1".try_into().unwrap()))
+            .unwrap();
+
+        assert!(!board
+            .actions()
+            .contains(&PacoAction::Place("g1".try_into().unwrap())));
+    }
+
+    /// Tests if the white king side castleing is blocked by an opponent sako.
+    #[test]
+    fn white_king_side_castle_blocked_sako() {
+        use PieceType::*;
+
+        let mut squares = HashMap::new();
+        squares.insert("e1".try_into().unwrap(), Square::white(King));
+        squares.insert("b5".try_into().unwrap(), Square::black(Bishop));
+        squares.insert("h1".try_into().unwrap(), Square::white(Rock));
+        let mut board = DenseBoard::from_squares(squares);
+        board.castling.white_queen_side = false;
+
+        board
+            .execute(PacoAction::Lift("e1".try_into().unwrap()))
+            .unwrap();
+
+        assert!(!board
+            .actions()
+            .contains(&PacoAction::Place("g1".try_into().unwrap())));
     }
 }
