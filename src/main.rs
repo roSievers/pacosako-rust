@@ -1,4 +1,3 @@
-
 mod parser;
 mod types;
 
@@ -713,7 +712,6 @@ impl PacoBoard for DenseBoard {
     }
 }
 
-
 impl Display for DenseBoard {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         use PlayerColor::*;
@@ -793,11 +791,9 @@ impl Display for DenseBoard {
         )?;
         Ok(())
     }
-
 }
 
 fn main() -> Result<(), PacoError> {
-
     let schema = "8 .. .. .B BR .K .. .. ..
 7 .P .. .. .P .. .. .P ..
 6 .. PP .. .. .N QR .. ..
@@ -926,7 +922,6 @@ fn trace_first_move<T: PacoBoard>(
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1041,7 +1036,6 @@ mod tests {
             .unwrap()
             .execute(PacoAction::Place("d4".try_into().unwrap()))
             .unwrap();
-
 
         let sako_states = find_sako_states(board).unwrap();
 

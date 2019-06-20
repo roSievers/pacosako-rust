@@ -1,10 +1,8 @@
-
 use std::fmt;
 
 use std::convert::TryFrom;
 use std::fmt::Debug;
 use std::fmt::Display;
-
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum PieceType {
@@ -120,7 +118,6 @@ impl TryFrom<&str> for BoardPosition {
         }
     }
 }
-
 
 #[cfg(test)]
 mod tests {
