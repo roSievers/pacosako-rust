@@ -5,17 +5,11 @@ use colored::*;
 
 use std::fmt;
 
-use std::fmt::Display;
-
-
-use std::collections::HashMap;
-
 use std::collections::hash_map::Entry;
-
+use std::collections::HashMap;
 use std::collections::HashSet;
-
 use std::collections::VecDeque;
-
+use std::fmt::Display;
 use types::{BoardPosition, PieceType, PlayerColor};
 
 #[derive(Clone, Debug)]
@@ -908,6 +902,7 @@ fn trace_first_move<T: PacoBoard>(
 mod tests {
     use super::*;
     use parser::Square;
+    use std::convert::{TryFrom, TryInto};
 
     fn find_sako_states<T: PacoBoard>(board: T) -> Result<Vec<T>, PacoError> {
         let opponent = board.current_player().other();
@@ -922,8 +917,8 @@ mod tests {
     #[test]
     fn test_simple_sako() {
         let mut squares = HashMap::new();
-        squares.insert(BoardPosition::new(2, 3), Square::white(PieceType::Bishop));
-        squares.insert(BoardPosition::new(5, 6), Square::black(PieceType::King));
+        squares.insert("c4".try_into().unwrap(), Square::white(PieceType::Bishop));
+        squares.insert("f7".try_into().unwrap(), Square::black(PieceType::King));
 
         let sako_states = find_sako_states(DenseBoard::from_squares(squares)).unwrap();
 
@@ -933,8 +928,8 @@ mod tests {
     #[test]
     fn test_simple_non_sako() {
         let mut squares = HashMap::new();
-        squares.insert(BoardPosition::new(2, 3), Square::white(PieceType::Bishop));
-        squares.insert(BoardPosition::new(5, 7), Square::black(PieceType::King));
+        squares.insert("c4".try_into().unwrap(), Square::white(PieceType::Bishop));
+        squares.insert("f8".try_into().unwrap(), Square::black(PieceType::King));
 
         let sako_states = find_sako_states(DenseBoard::from_squares(squares)).unwrap();
 
@@ -944,12 +939,12 @@ mod tests {
     #[test]
     fn test_chain_sako() {
         let mut squares = HashMap::new();
-        squares.insert(BoardPosition::new(2, 3), Square::white(PieceType::Bishop));
+        squares.insert("c4".try_into().unwrap(), Square::white(PieceType::Bishop));
         squares.insert(
-            BoardPosition::new(5, 6),
+            "f7".try_into().unwrap(),
             Square::pair(PieceType::Rock, PieceType::Pawn),
         );
-        squares.insert(BoardPosition::new(5, 4), Square::black(PieceType::King));
+        squares.insert("f5".try_into().unwrap(), Square::black(PieceType::King));
 
         let sako_states = find_sako_states(DenseBoard::from_squares(squares)).unwrap();
 
@@ -963,38 +958,38 @@ mod tests {
         // Setup a situaltion where en passant can happen.
         let mut squares = HashMap::new();
         // White pawn that moves two squares forward
-        squares.insert(BoardPosition::new(3, 1), Square::white(Pawn));
+        squares.insert("d2".try_into().unwrap(), Square::white(Pawn));
         // Black pawn that will unite en passant
-        squares.insert(BoardPosition::new(4, 3), Square::black(Pawn));
+        squares.insert("e4".try_into().unwrap(), Square::black(Pawn));
         // White pawn to block the black pawn from advancing, reducing the black action space.
         squares.insert(BoardPosition::new(4, 2), Square::white(Pawn));
         let mut board = DenseBoard::from_squares(squares);
 
         // Advance the white pawn and lift the black pawn.
         board
-            .execute(PacoAction::Lift(BoardPosition::new(3, 1)))
+            .execute(PacoAction::Lift("d2".try_into().unwrap()))
             .unwrap()
-            .execute(PacoAction::Place(BoardPosition::new(3, 3)))
+            .execute(PacoAction::Place("d4".try_into().unwrap()))
             .unwrap()
-            .execute(PacoAction::Lift(BoardPosition::new(4, 3)))
+            .execute(PacoAction::Lift("e4".try_into().unwrap()))
             .unwrap();
 
         // Check if the correct legal moves are returned
         assert_eq!(
             board.actions(),
-            vec![PacoAction::Place(BoardPosition::new(3, 2))]
+            vec![PacoAction::Place("d3".try_into().unwrap())]
         );
 
         // Execute en passant union
         board
-            .execute(PacoAction::Place(BoardPosition::new(3, 2)))
+            .execute(PacoAction::Place("d3".try_into().unwrap()))
             .unwrap();
 
         // Check if the target pawn was indeed united.
         assert_eq!(
             *board
                 .white
-                .get(BoardPosition::new(3, 2).0 as usize)
+                .get(BoardPosition::try_from("d3").unwrap().0 as usize)
                 .unwrap(),
             Some(Pawn)
         );
@@ -1007,15 +1002,15 @@ mod tests {
 
         // Setup a situation where en passant can happen.
         let mut squares = HashMap::new();
-        squares.insert(BoardPosition::new(2, 3), Square::black(Pawn));
-        squares.insert(BoardPosition::new(3, 1), Square::pair(Pawn, Knight));
-        squares.insert(BoardPosition::new(4, 0), Square::white(King));
+        squares.insert("c4".try_into().unwrap(), Square::black(Pawn));
+        squares.insert("d2".try_into().unwrap(), Square::pair(Pawn, Knight));
+        squares.insert("e1".try_into().unwrap(), Square::white(King));
 
         let mut board = DenseBoard::from_squares(squares);
         board
-            .execute(PacoAction::Lift(BoardPosition::new(3, 1)))
+            .execute(PacoAction::Lift("d2".try_into().unwrap()))
             .unwrap()
-            .execute(PacoAction::Place(BoardPosition::new(3, 3)))
+            .execute(PacoAction::Place("d4".try_into().unwrap()))
             .unwrap();
 
 
@@ -1031,16 +1026,16 @@ mod tests {
         use PlayerColor::*;
 
         let mut squares = HashMap::new();
-        squares.insert(BoardPosition::new(2, 6), Square::white(Pawn));
+        squares.insert("c7".try_into().unwrap(), Square::white(Pawn));
 
         let mut board = DenseBoard::from_squares(squares);
         board
-            .execute(PacoAction::Lift(BoardPosition::new(2, 6)))
+            .execute(PacoAction::Lift("c7".try_into().unwrap()))
             .unwrap()
-            .execute(PacoAction::Place(BoardPosition::new(2, 7)))
+            .execute(PacoAction::Place("c8".try_into().unwrap()))
             .unwrap();
 
-        assert_eq!(board.promotion, Some(BoardPosition::new(2, 7)));
+        assert_eq!(board.promotion, Some("c8".try_into().unwrap()));
         assert_eq!(board.current_player(), Black);
         assert_eq!(board.controlling_player(), White);
         assert_eq!(
@@ -1062,10 +1057,10 @@ mod tests {
 
         let mut squares = HashMap::new();
         // Note that King on c8 does not lead to a unique ŝako.
-        squares.insert(BoardPosition::new(3, 5), Square::black(King));
-        squares.insert(BoardPosition::new(3, 6), Square::white(Pawn));
-        squares.insert(BoardPosition::new(4, 7), Square::pair(Bishop, Pawn));
-        squares.insert(BoardPosition::new(5, 6), Square::pair(Bishop, Pawn));
+        squares.insert("d6".try_into().unwrap(), Square::black(King));
+        squares.insert("d7".try_into().unwrap(), Square::white(Pawn));
+        squares.insert("e8".try_into().unwrap(), Square::pair(Bishop, Pawn));
+        squares.insert("f7".try_into().unwrap(), Square::pair(Bishop, Pawn));
 
         let board = DenseBoard::from_squares(squares);
 
