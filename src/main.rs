@@ -794,20 +794,22 @@ impl Display for DenseBoard {
 }
 
 fn main() -> Result<(), PacoError> {
-    let schema = "8 .. .. .B BR .K .. .. ..
-7 .P .. .. .P .. .. .P ..
-6 .. PP .. .. .N QR .. ..
-5 BB .. .. NP .. .P .. .P
-4 P. PN .. .. .. PP .. P.
-3 .. .. .. .. .Q .. .. ..
-2 .. .. N. P. .. P. P. ..
-1 .. R. .. .. .. R. K. ..
+    let schema = "8 .. .. .. .. .K .B .. .R
+7 .P .. .. .. .P .. .. .P
+6 .. .. .P .. QB .R .P ..
+5 .. .P .. .. BP .. N. ..
+4 .. P. .. PQ .. .. BN PN
+3 .. .. N. .. PP .. .. ..
+2 P. .. P. .. .. P. .. P.
+1 R. .. .. .. .. R. K. ..
 * A  B  C  D  E  F  G  H";
 
     let parsed = parser::matrix(schema);
 
     if let Ok((_, matrix)) = parsed {
-        analyse_sako(DenseBoard::from_squares(matrix.0))?;
+        let mut board = DenseBoard::from_squares(matrix.0);
+        board.current_player = board.current_player().other();
+        analyse_sako(board)?;
     }
 
     Ok(())
@@ -828,7 +830,7 @@ fn analyse_sako(board: impl PacoBoard) -> Result<(), PacoError> {
     println!("I found the following ŝako sequences:");
     // Is there a state where the black king is dancing?
     for board in explored.settled {
-        if board.king_in_union(PlayerColor::Black) {
+        if board.king_in_union(board.current_player()) {
             println!("{}", board);
             println!("{:?}", trace_first_move(&board, &explored.found_via));
         }
