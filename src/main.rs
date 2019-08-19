@@ -2,6 +2,7 @@ mod parser;
 mod types;
 
 use colored::*;
+use serde::{Deserialize, Serialize};
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -83,6 +84,45 @@ struct DenseBoard {
     promotion: Option<BoardPosition>,
     /// Stores castling information
     castling: Castling,
+}
+
+#[derive(Serialize, Deserialize)]
+struct EditorBoard {
+    pieces: Vec<RestingPiece>,
+}
+
+impl From<&DenseBoard> for EditorBoard {
+    fn from(dense: &DenseBoard) -> Self {
+        // A normal game of Paco Ŝako will have 32 pieces on the board at any time.
+        // All other boards are special and don't need to be optimized for.
+        let mut pieces = Vec::with_capacity(32);
+
+        // Iterate over all positions and construct a RestingPiece whenever we find Some(piece).
+        pieces.extend(dense.white.iter().enumerate().filter_map(|p| {
+            p.1.map(|piece_type| RestingPiece {
+                piece_type,
+                color: PlayerColor::White,
+                position: BoardPosition(p.0 as u8),
+            })
+        }));
+
+        pieces.extend(dense.black.iter().enumerate().filter_map(|p| {
+            p.1.map(|piece_type| RestingPiece {
+                piece_type,
+                color: PlayerColor::Black,
+                position: BoardPosition(p.0 as u8),
+            })
+        }));
+
+        EditorBoard { pieces }
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+struct RestingPiece {
+    piece_type: PieceType,
+    color: PlayerColor,
+    position: BoardPosition,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
@@ -808,6 +848,14 @@ fn main() -> Result<(), PacoError> {
 
     if let Ok((_, matrix)) = parsed {
         let mut board = DenseBoard::from_squares(matrix.0);
+
+        // Print the board as json using serde.
+        let pieces : EditorBoard = (&board).into();
+
+        // Serialize it to a JSON string.
+        let j = serde_json::to_string(&pieces).unwrap();
+        println!("{}", j);
+
         board.current_player = board.current_player().other();
         analyse_sako(board)?;
     }

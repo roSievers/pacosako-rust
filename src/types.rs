@@ -3,8 +3,9 @@ use std::fmt;
 use std::convert::TryFrom;
 use std::fmt::Debug;
 use std::fmt::Display;
+use serde::{Serialize, Deserialize};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum PieceType {
     Pawn,
     Rock,
@@ -14,13 +15,13 @@ pub enum PieceType {
     King,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum PlayerColor {
     White,
     Black,
 }
 
-#[derive(Copy, Clone, PartialEq, Eq, Hash)]
+#[derive(Copy, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct BoardPosition(pub u8);
 
 impl BoardPosition {
