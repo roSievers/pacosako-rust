@@ -10,6 +10,7 @@ use std::collections::VecDeque;
 use std::fmt;
 use std::fmt::Display;
 use types::{BoardPosition, PieceType, PlayerColor};
+use wasm_bindgen::prelude::*;
 
 #[cfg(test)]
 extern crate quickcheck;
@@ -17,7 +18,7 @@ extern crate quickcheck;
 #[macro_use(quickcheck)]
 extern crate quickcheck_macros;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize)]
 pub enum PacoError {
     /// You can not "Lift" when the hand is full.
     LiftFullHand,
@@ -33,6 +34,8 @@ pub enum PacoError {
     PromoteToPawn,
     /// You can not "Promote" a pawn to a king.
     PromoteToKing,
+    /// The input JSON is malformed.
+    InputJsonMalformed,
 }
 
 impl PlayerColor {
@@ -73,7 +76,6 @@ impl PieceType {
 pub struct DenseBoard {
     white: Vec<Option<PieceType>>,
     black: Vec<Option<PieceType>>,
-    dance: Vec<bool>,
     /// The player which is next to execute a move. This is different from the controlling player
     /// which can currently execute an action, when there is a promotion at the end of the turn.
     pub current_player: PlayerColor,
@@ -118,11 +120,45 @@ impl From<&DenseBoard> for EditorBoard {
     }
 }
 
+impl EditorBoard {
+    pub fn with_active_player(&self, current_player: PlayerColor) -> DenseBoard {
+        let mut result: DenseBoard = DenseBoard {
+            white: vec![None; 64],
+            black: vec![None; 64],
+            current_player,
+            lifted_piece: Hand::Empty,
+            en_passant: None,
+            promotion: None,
+            castling: Castling::new(),
+        };
+
+        // Copy piece from the `pieces` list into the dense arrays.
+        for piece in &self.pieces {
+            match piece.color {
+                PlayerColor::White => {
+                    result.white[piece.position.0 as usize] = Some(piece.piece_type)
+                }
+                PlayerColor::Black => {
+                    result.black[piece.position.0 as usize] = Some(piece.piece_type)
+                }
+            }
+        }
+
+        result
+    }
+}
+
 #[derive(Serialize, Deserialize)]
 struct RestingPiece {
     piece_type: PieceType,
     color: PlayerColor,
     position: BoardPosition,
+}
+
+#[derive(Serialize, Debug)]
+pub struct SakoSearchResult {
+    white: Vec<Vec<PacoAction>>,
+    black: Vec<Vec<PacoAction>>,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
@@ -174,7 +210,7 @@ impl Hand {
 
 /// A PacoAction is an action that can be applied to a PacoBoard to modify it.
 /// An action is an atomar part of a move, like picking up a piece or placing it down.
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PacoAction {
     /// Lifting a piece starts a move.
     Lift(BoardPosition),
@@ -211,7 +247,6 @@ impl DenseBoard {
         let mut result: Self = DenseBoard {
             white: Vec::with_capacity(64),
             black: Vec::with_capacity(64),
-            dance: vec![false; 64],
             current_player: PlayerColor::White,
             lifted_piece: Hand::Empty,
             en_passant: None,
@@ -258,7 +293,6 @@ impl DenseBoard {
         DenseBoard {
             white: vec![None; 64],
             black: vec![None; 64],
-            dance: vec![false; 64],
             current_player: PlayerColor::White,
             lifted_piece: Hand::Empty,
             en_passant: None,
@@ -1178,5 +1212,51 @@ mod tests {
         assert!(!board
             .actions()
             .contains(&PacoAction::Place("g1".try_into().unwrap())));
+    }
+}
+
+pub fn find_sako_sequences(board: &EditorBoard) -> Result<SakoSearchResult, PacoError> {
+    let mut white = vec![];
+    let mut black = vec![];
+
+    let white_board = board.with_active_player(PlayerColor::White);
+    println!("The input board position is");
+    println!("{}", white_board);
+
+    let explored = determine_all_moves(white_board)?;
+    // Is there a state where the black king is dancing?
+    for board in explored.settled {
+        if board.king_in_union(PlayerColor::Black) {
+            if let Some(trace) = trace_first_move(&board, &explored.found_via) {
+                white.push(trace);
+            }
+        }
+    }
+
+    let black_board = board.with_active_player(PlayerColor::Black);
+    println!("The input board position is");
+    println!("{}", black_board);
+
+    let explored = determine_all_moves(black_board)?;
+    // Is there a state where the black king is dancing?
+    for board in explored.settled {
+        if board.king_in_union(PlayerColor::White) {
+            if let Some(trace) = trace_first_move(&board, &explored.found_via) {
+                black.push(trace);
+            }
+        }
+    }
+
+    Ok(SakoSearchResult { white, black })
+}
+
+#[wasm_bindgen]
+pub fn find_sako_sequences_json(board: &str) -> String {
+    let editor_board: EditorBoard = serde_json::from_str(board).unwrap();
+    let search_result = find_sako_sequences(&editor_board);
+
+    match search_result {
+        Ok(search_result) => serde_json::to_string(&search_result).unwrap(),
+        Err(error) => serde_json::to_string(&error).unwrap(),
     }
 }
