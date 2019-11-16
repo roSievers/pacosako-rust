@@ -12,6 +12,10 @@ use std::fmt::Display;
 use types::{BoardPosition, PieceType, PlayerColor};
 use wasm_bindgen::prelude::*;
 
+use rand::distributions::{Distribution, Standard};
+use rand::seq::SliceRandom;
+use rand::Rng;
+
 #[cfg(test)]
 extern crate quickcheck;
 #[cfg(test)]
@@ -88,6 +92,91 @@ pub struct DenseBoard {
     castling: Castling,
 }
 
+/// Defines a random generator for Paco Ŝako games that are not over yet.
+/// I.e. where both kings are still free. This works by placing the pieces
+/// randomly on the board.
+impl Distribution<DenseBoard> for Standard {
+    fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> DenseBoard {
+        let mut board = DenseBoard::new();
+
+        // Shuffle white and black pieces around
+        board.white.shuffle(rng);
+        board.black.shuffle(rng);
+
+        // Check all positions for violations
+        // No pawns on the enemy home row
+        for i in 0..64 {
+            if i < 8 && board.black[i] == Some(PieceType::Pawn) {
+                let free_index = loop {
+                    let candidate = board.random_position_without_black(rng);
+                    if candidate >= 8 {
+                        break candidate;
+                    }
+                };
+                board.black.swap(i, free_index);
+            }
+            if i >= 56 && board.white[i] == Some(PieceType::Pawn) {
+                let free_index = loop {
+                    let candidate = board.random_position_without_white(rng);
+                    if candidate < 56 {
+                        break candidate;
+                    }
+                };
+                board.white.swap(i, free_index);
+            }
+        }
+
+        // No single pawns on the own home row
+        for i in 0..64 {
+            if i < 8
+                && board.white[i] == Some(PieceType::Pawn)
+                && (board.black[i] == None || board.black[i] == Some(PieceType::King))
+            {
+                let free_index = loop {
+                    let candidate = board.random_position_without_white(rng);
+                    if candidate >= 8 && candidate < 56 {
+                        break candidate;
+                    }
+                };
+                board.white.swap(i, free_index);
+            }
+            if i >= 56
+                && board.black[i] == Some(PieceType::Pawn)
+                && (board.white[i] == None || board.white[i] == Some(PieceType::King))
+            {
+                let free_index = loop {
+                    let candidate = board.random_position_without_black(rng);
+                    if candidate >= 8 && candidate < 56 {
+                        break candidate;
+                    }
+                };
+                board.black.swap(i, free_index);
+            }
+        }
+
+        // Ensure, that the king is single. (Done after all other pieces are moved).
+        for i in 0..64 {
+            if board.white[i] == Some(PieceType::King) && board.black[i] != None {
+                let free_index = board.random_empty_position(rng);
+                board.white.swap(i, free_index);
+            }
+            if board.black[i] == Some(PieceType::King) && board.white[i] != None {
+                let free_index = board.random_empty_position(rng);
+                board.black.swap(i, free_index);
+            }
+        }
+
+        // Randomize current player
+        board.current_player = if rng.gen() {
+            PlayerColor::White
+        } else {
+            PlayerColor::Black
+        };
+
+        board
+    }
+}
+
 #[derive(Serialize, Deserialize)]
 pub struct EditorBoard {
     pieces: Vec<RestingPiece>,
@@ -157,8 +246,8 @@ struct RestingPiece {
 
 #[derive(Serialize, Debug)]
 pub struct SakoSearchResult {
-    white: Vec<Vec<PacoAction>>,
-    black: Vec<Vec<PacoAction>>,
+    pub white: Vec<Vec<PacoAction>>,
+    pub black: Vec<Vec<PacoAction>>,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
@@ -715,6 +804,42 @@ impl DenseBoard {
         }
         possible_moves
     }
+
+    /// Used for random board generation
+    /// This will not terminate if the board is full.
+    /// The runtime of this function is not deterministic. (Geometric distribution)
+    fn random_empty_position<R: Rng + ?Sized>(&self, rng: &mut R) -> usize {
+        loop {
+            let candidate = rng.gen_range(0, 64);
+            if self.white[candidate] == None && self.black[candidate] == None {
+                return candidate;
+            }
+        }
+    }
+
+    /// Used for random board generation
+    /// This will not terminate if the board is full.
+    /// The runtime of this function is not deterministic. (Geometric distribution)
+    fn random_position_without_white<R: Rng + ?Sized>(&self, rng: &mut R) -> usize {
+        loop {
+            let candidate = rng.gen_range(0, 64);
+            if self.white[candidate] == None {
+                return candidate;
+            }
+        }
+    }
+
+    /// Used for random board generation
+    /// This will not terminate if the board is full.
+    /// The runtime of this function is not deterministic. (Geometric distribution)
+    fn random_position_without_black<R: Rng + ?Sized>(&self, rng: &mut R) -> usize {
+        loop {
+            let candidate = rng.gen_range(0, 64);
+            if self.black[candidate] == None {
+                return candidate;
+            }
+        }
+    }
 }
 
 impl PacoBoard for DenseBoard {
@@ -795,10 +920,7 @@ impl Default for DenseBoard {
 impl Display for DenseBoard {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         use PlayerColor::*;
-        writeln!(
-            f,
-            "╔═══════════════════════════╗"
-        )?;
+        writeln!(f, "╔═══════════════════════════╗")?;
         let mut trailing_bracket = false;
         let highlighted_position = self.lifted_piece.position().map(|p| p.0 as usize);
         for y in (0..8).rev() {
@@ -865,10 +987,7 @@ impl Display for DenseBoard {
                 )?;
             }
         }
-        write!(
-            f,
-            "╚═══════════════════════════╝"
-        )?;
+        write!(f, "╚═══════════════════════════╝")?;
         Ok(())
     }
 }
@@ -1213,6 +1332,74 @@ mod tests {
             .actions()
             .contains(&PacoAction::Place("g1".try_into().unwrap())));
     }
+
+    #[test]
+    fn random_dense_board_consistent() {
+        use rand::{thread_rng, Rng};
+
+        let mut rng = thread_rng();
+        for _ in 0..1000 {
+            let board: DenseBoard = rng.gen();
+
+            let mut whites_found = 0;
+            let mut blacks_found = 0;
+
+            // Check all positions for violations
+            for i in 0..64 {
+                // Count pieces
+                if board.white[i].is_some() {
+                    whites_found += 1;
+                }
+                if board.black[i].is_some() {
+                    blacks_found += 1;
+                }
+
+                // The king should be single
+                if board.white[i] == Some(PieceType::King) {
+                    assert_eq!(board.black[i], None, "The white king is united.\n{}", board);
+                }
+                if board.black[i] == Some(PieceType::King) {
+                    assert_eq!(board.white[i], None, "The black king is united.\n{}", board);
+                }
+                // No pawns on the enemy home row
+                // No single pawns on the own home row
+                if i < 8 {
+                    assert_ne!(
+                        board.black[i],
+                        Some(PieceType::Pawn),
+                        "There is a black pawn on the white home row\n{}",
+                        board
+                    );
+                    if board.black[i] == None {
+                        assert_ne!(
+                            board.white[i],
+                            Some(PieceType::Pawn),
+                            "There is a single white pawn on the white home row\n{}",
+                            board
+                        );
+                    }
+                }
+                if i >= 56 {
+                    assert_ne!(
+                        board.white[i],
+                        Some(PieceType::Pawn),
+                        "There is a white pawn on the black home row\n{}",
+                        board
+                    );
+                    if board.white[i] == None {
+                        assert_ne!(
+                            board.black[i],
+                            Some(PieceType::Pawn),
+                            "There is a single black pawn on the black home row\n{}",
+                            board
+                        );
+                    }
+                }
+            }
+            assert_eq!(whites_found, 16);
+            assert_eq!(blacks_found, 16);
+        }
+    }
 }
 
 pub fn find_sako_sequences(board: &EditorBoard) -> Result<SakoSearchResult, PacoError> {
@@ -1220,9 +1407,6 @@ pub fn find_sako_sequences(board: &EditorBoard) -> Result<SakoSearchResult, Paco
     let mut black = vec![];
 
     let white_board = board.with_active_player(PlayerColor::White);
-    println!("The input board position is");
-    println!("{}", white_board);
-
     let explored = determine_all_moves(white_board)?;
     // Is there a state where the black king is dancing?
     for board in explored.settled {
@@ -1234,9 +1418,6 @@ pub fn find_sako_sequences(board: &EditorBoard) -> Result<SakoSearchResult, Paco
     }
 
     let black_board = board.with_active_player(PlayerColor::Black);
-    println!("The input board position is");
-    println!("{}", black_board);
-
     let explored = determine_all_moves(black_board)?;
     // Is there a state where the black king is dancing?
     for board in explored.settled {
