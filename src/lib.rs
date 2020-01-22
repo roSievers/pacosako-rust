@@ -2,19 +2,19 @@ pub mod parser;
 pub mod types;
 
 use colored::*;
+use rand::distributions::{Distribution, Standard};
+use rand::seq::SliceRandom;
+use rand::Rng;
 use serde::{Deserialize, Serialize};
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::collections::VecDeque;
+use std::convert::TryFrom;
 use std::fmt;
 use std::fmt::Display;
 use types::{BoardPosition, PieceType, PlayerColor};
 use wasm_bindgen::prelude::*;
-
-use rand::distributions::{Distribution, Standard};
-use rand::seq::SliceRandom;
-use rand::Rng;
 
 #[cfg(test)]
 extern crate quickcheck;
@@ -973,9 +973,14 @@ impl From<&DenseBoard> for ExchangeNotation {
     }
 }
 
-impl From<&ExchangeNotation> for DenseBoard {
-    fn from(notation: &ExchangeNotation) -> Self {
-        unimplemented!()
+impl TryFrom<&ExchangeNotation> for DenseBoard {
+    type Error = ();
+    fn try_from(notation: &ExchangeNotation) -> Result<Self, ()> {
+        if let Some(matrix) = parser::try_exchange_notation(&notation.0) {
+            Ok(DenseBoard::from_squares(matrix.0))
+        } else {
+            Err(())
+        }
     }
 }
 

@@ -68,11 +68,29 @@ pub fn matrix(input: &str) -> IResult<&str, Matrix> {
     Ok((input, matrix_transform(raw)))
 }
 
+fn exchange_notation(input: &str) -> IResult<&str, Matrix> {
+    let (input, raw) = nom::multi::separated_list(tag("\n"), unlabled_row)(input)?;
+    let row_indices: Vec<u8> = vec![8, 7, 6, 5, 4, 3, 2, 1];
+    let labled_rows: Vec<(u8, Vec<Square>)> =
+        row_indices.into_iter().zip(raw.into_iter()).collect();
+
+    Ok((input, matrix_transform(labled_rows)))
+}
+
+pub fn try_exchange_notation(input: &str) -> Option<Matrix> {
+    exchange_notation(input).map(|x| x.1).ok()
+}
+
 fn row(input: &str) -> IResult<&str, (u8, Vec<Square>)> {
     let (input, index) = nom::character::streaming::one_of("12345678")(input)?;
     let (input, _) = tag(" ")(input)?;
     let (input, content) = nom::multi::separated_list(tag(" "), square)(input)?;
     Ok((input, (index.to_digit(10).unwrap_or(0) as u8, content)))
+}
+
+fn unlabled_row(input: &str) -> IResult<&str, Vec<Square>> {
+    let (input, content) = nom::multi::separated_list(tag(" "), square)(input)?;
+    Ok((input, content))
 }
 
 fn square(input: &str) -> IResult<&str, Square> {
