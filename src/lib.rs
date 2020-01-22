@@ -1,5 +1,5 @@
 pub mod parser;
-mod types;
+pub mod types;
 
 use colored::*;
 use serde::{Deserialize, Serialize};
@@ -307,6 +307,22 @@ pub enum PacoAction {
     Place(BoardPosition),
     /// Promote the pawn that is currently up for promotion
     Promote(PieceType),
+}
+
+impl PacoAction {
+    pub fn is_promotion(&self) -> bool {
+        match self {
+            PacoAction::Promote(_) => true,
+            _ => false,
+        }
+    }
+    pub fn position(&self) -> Option<BoardPosition> {
+        match self {
+            PacoAction::Lift(p) => Some(*p),
+            PacoAction::Place(p) => Some(*p),
+            PacoAction::Promote(_) => None,
+        }
+    }
 }
 
 /// The PacoBoard trait encapsulates arbitrary Board implementations.
@@ -947,7 +963,7 @@ impl From<&DenseBoard> for ExchangeNotation {
                 if x != 7 {
                     f.push_str(" ");
                 }
-        }
+            }
             if y != 0 {
                 f.push_str("\n");
             }
