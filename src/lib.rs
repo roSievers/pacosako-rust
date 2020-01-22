@@ -917,6 +917,52 @@ impl Default for DenseBoard {
     }
 }
 
+/// Represents a board state in human readable exchange notation for Paco Ŝako.
+/// It will look like this. Line breaks are included in the String as '\n'.
+///
+///     .. .. .. .B .. .. .. ..
+///     .B R. .. .. .Q .. .. P.
+///     .. .P .P .K .. NP P. ..
+///     PR .R PP .. .. .. .. ..
+///     K. .P P. .. NN .. .. ..
+///     P. .P .. P. .. .. BP R.
+///     P. .. .P .. .. .. BN Q.
+///     .. .. .. .. .. .. .. ..
+#[derive(Debug, Clone)]
+pub struct ExchangeNotation(pub String);
+
+impl From<&DenseBoard> for ExchangeNotation {
+    fn from(board: &DenseBoard) -> Self {
+        let mut f = String::with_capacity(191);
+
+        for y in (0..8).rev() {
+            for x in 0..8 {
+                let coord = BoardPosition::new(x, y).0 as usize;
+                let w = board.white.get(coord).unwrap();
+                f.push_str(w.map(PieceType::to_char).unwrap_or("."));
+
+                let b = board.black.get(coord).unwrap();
+                f.push_str(b.map(PieceType::to_char).unwrap_or("."));
+
+                if x != 7 {
+                    f.push_str(" ");
+                }
+        }
+            if y != 0 {
+                f.push_str("\n");
+            }
+        }
+        assert_eq!(f.len(), 191);
+        ExchangeNotation(f)
+    }
+}
+
+impl From<&ExchangeNotation> for DenseBoard {
+    fn from(notation: &ExchangeNotation) -> Self {
+        unimplemented!()
+    }
+}
+
 impl Display for DenseBoard {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         use PlayerColor::*;
